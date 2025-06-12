@@ -202,3 +202,7 @@ cython_debug/
 *.out
 *.app
 
+.vscode/
+data/
+examples/
+test_results/
