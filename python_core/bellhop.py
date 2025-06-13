@@ -1,13 +1,222 @@
-from readwrite import write_env, read_shd, get_rays
-from env import Pos, Source, Dom, cInt, SSPraw, SSP, HS, BotBndry, TopBndry, Bndry, Box, Beam
+try:
+    # 尝试相对导入 (用于包模式)
+    from .readwrite import write_env, read_shd, get_rays
+    from .env import Pos, Source, Dom, cInt, SSPraw, SSP, HS, BotBndry, TopBndry, Bndry, Box, Beam
+    from .config import AtBinPath
+except ImportError:
+    # 尝试绝对导入 (用于直接脚本模式)
+    from readwrite import write_env, read_shd, get_rays
+    from env import Pos, Source, Dom, cInt, SSPraw, SSP, HS, BotBndry, TopBndry, Bndry, Box, Beam
+    from config import AtBinPath
+
 from os import system
 import numpy as np
-from config import AtBinPath
 from multiprocessing import Pool
 from scipy.stats import norm
 import math
 import os  # Add this import
 import warnings
+
+
+# 新增多频率批量处理函数
+def call_Bellhop_multi_freq(frequencies, source_depth, receiver_depths, receiver_ranges, 
+                           bathymetry, sound_speed_profile, sediment, bottom_params,
+                           return_pressure=False, performance_mode=False, 
+                           beam_number=None, grazing_high=None, grazing_low=None):
+    """
+    Multi-frequency Bellhop calculation function
+    
+    Args:
+        frequencies: array of frequencies (Hz)
+        source_depth: source depth (m) 
+        receiver_depths: receiver depth array (m)
+        receiver_ranges: receiver range array (m)
+        bathymetry: bathymetry data
+        sound_speed_profile: sound speed profile
+        sediment: sediment layer data
+        bottom_params: bottom parameters
+        return_pressure: whether to return pressure data
+        performance_mode: performance mode flag
+        beam_number: user-specified beam number
+        grazing_high: upper grazing angle limit (degrees)
+        grazing_low: lower grazing angle limit (degrees)
+    
+    Returns:
+        (Pos1, TL_multi, pressure_multi) where TL_multi and pressure_multi have frequency dimension
+    """
+    # 确保频率是数组
+    if not isinstance(frequencies, (list, np.ndarray)):
+        frequencies = [frequencies]
+    frequencies = np.array(frequencies)
+    Nfreq = len(frequencies)
+    
+    print(f"Starting multi-frequency calculation for {Nfreq} frequencies: {frequencies}")
+    
+    # Source and receiving position setup (similar to WGNPd implementation)
+    filename = 'data/tmp/multi_freq'
+    
+    # **确保目录存在**
+    os.makedirs('data/tmp', exist_ok=True)
+    
+    # Convert units for Bellhop
+    ran = np.array(receiver_ranges) / 1000.0  # Convert to km
+    RD = np.array(receiver_depths)  # Keep in meters
+    Rmax = max(ran)
+    
+    print(f"Using user-defined grid: {len(receiver_ranges)} range points, {len(RD)} depth points")
+    
+    # Calculate sound speed profile related parameters
+    NZmax, Zmax, ssp_idx = calZmax(sound_speed_profile)
+    
+    pos = Pos(Source(source_depth), Dom(ran, RD))
+    
+    # Range of phase velocity
+    cint_obj = cInt(1400, 15000)
+
+    # The number of media
+    NMedia = 1
+    ssp_raw = []
+    depth = [0]
+    
+    # Sound speed profile setup (same as single frequency)
+    Z_original = sound_speed_profile[ssp_idx].z
+    Cp_original = sound_speed_profile[ssp_idx].c
+    
+    if len(Z_original) < NZmax:
+        Z = np.zeros(NZmax)
+        Cp = np.zeros(NZmax)
+        Z[:len(Z_original)] = Z_original
+        Cp[:len(Cp_original)] = Cp_original
+        
+        for i in range(len(Z_original), NZmax):
+            if len(Z_original) > 1:
+                Z[i] = Z_original[-1] + (i - len(Z_original) + 1) * 10
+                Cp[i] = Cp_original[-1]
+            else:
+                Z[i] = i * 10
+                Cp[i] = 1500
+    else:
+        Z = Z_original[:NZmax]
+        Cp = Cp_original[:NZmax]
+    
+    Cs = np.zeros(len(Z))
+    Rho = np.ones(len(Z))
+    Ap = np.zeros(len(Z))
+    As = np.zeros(len(Z))
+    ssp_raw.append(SSPraw(Z, Cp, Cs, Rho, Ap, As))
+    depth.append(Z[-1])
+
+    Opt_top = 'SVW'
+    N = np.zeros(NMedia, np.int8)
+    Sigma = np.zeros(NMedia + 1)
+    sspB = SSP(ssp_raw, depth, NMedia, Opt_top, N, Sigma)
+
+    # Bottom option
+    hs = HS(bottom_params[0].cp, bottom_params[0].cs, bottom_params[0].rho, bottom_params[0].a_p, bottom_params[0].a_s)
+    Opt_bot = 'A~'
+    bottom = BotBndry(Opt_bot, hs)
+    top = TopBndry(Opt_top)
+    bdy = Bndry(top, bottom)
+    
+    # Beam params setup
+    run_type = 'C'
+    box = Box(Zmax, max(bathymetry.r))
+    deltas = 0
+    
+    # 为每个频率创建独立的环境文件
+    Filenames = []
+    for iF in range(Nfreq):
+        freq = frequencies[iF]
+        
+        # 计算当前频率的射线参数
+        if beam_number is not None and beam_number > 0:
+            totalBeams = int(beam_number)
+        else:
+            if performance_mode:
+                totalBeams = min(200, beamsnumber(freq, Rmax, max(bathymetry.d)))
+            else:
+                totalBeams = beamsnumber(freq, Rmax, max(bathymetry.d))
+        
+        # 计算角度范围
+        if grazing_low is not None and grazing_high is not None:
+            Alpha = [float(grazing_low), float(grazing_high)]
+            NAlphaRange = 1
+        else:
+            if performance_mode:
+                NAlphaRange = 6
+            else:
+                NAlphaRange = 12
+            Alpha = alphadiv(NAlphaRange, Rmax)
+        
+        # 为当前频率创建多个角度分段文件
+        if len(Alpha) == 2 and NAlphaRange == 1:
+            # 用户指定角度范围
+            alpha = np.array([float(Alpha[0]), float(Alpha[1])])
+            nbeams = totalBeams
+            beam = Beam(RunType=run_type, Nbeams=nbeams, alpha=alpha, box=box, deltas=deltas)
+            filenameI = filename + f'_f{iF}_a0'
+            write_env(filenameI + '.env', 'BELLHOP', 'Pekeris profile', freq, sspB, bdy, pos, beam, cint_obj, Rmax)
+            write_ssp(filenameI, sound_speed_profile, bathymetry, NZmax)
+            write_bathy(filenameI, bathymetry)
+            Filenames.append(filenameI)
+        else:
+            # 多个角度分段
+            for iAlphaRange in range(len(Alpha) - 1):
+                alpha = np.array([float(Alpha[iAlphaRange]), float(Alpha[iAlphaRange + 1])])
+                alpha_diff = float(alpha[1] - alpha[0])
+                nbeams = int(totalBeams * alpha_diff / 180.0)
+                nbeams = max(1, nbeams)
+                beam = Beam(RunType=run_type, Nbeams=nbeams, alpha=alpha, box=box, deltas=deltas)
+                filenameI = filename + f'_f{iF}_a{iAlphaRange}'
+                write_env(filenameI + '.env', 'BELLHOP', 'Pekeris profile', freq, sspB, bdy, pos, beam, cint_obj, Rmax)
+                write_ssp(filenameI, sound_speed_profile, bathymetry, NZmax)
+                write_bathy(filenameI, bathymetry)
+                Filenames.append(filenameI)
+    
+    # 并行执行所有频率和角度的计算
+    pool = Pool(min(len(Filenames), 8))  # 限制并行进程数
+    pool.map(call_Bellhop_p, Filenames)
+    pool.close()
+    pool.join()
+    
+    # 读取和组合结果
+    if return_pressure:
+        Pressure = np.zeros([1, Nfreq, len(RD), len(ran)], dtype=complex)
+    TL_multi = np.zeros([Nfreq, len(RD), len(ran)])
+    
+    Pos1 = None
+    for iF in range(Nfreq):
+        pressure_sum = None
+        
+        # 读取当前频率的所有角度分段结果
+        freq_filenames = [f for f in Filenames if f.endswith(f'_f{iF}_a0') or f'_f{iF}_a' in f]
+        freq_filenames = [f for f in Filenames if f'_f{iF}_a' in f]
+        
+        for filenameI in freq_filenames:
+            try:
+                [x, x, x, x, Pos1, pressure] = read_shd(filenameI + '.shd')
+                if pressure_sum is None:
+                    pressure_sum = pressure.copy()
+                else:
+                    pressure_sum = pressure_sum + pressure
+            except Exception as e:
+                print(f"Warning: Failed to read {filenameI}.shd: {e}")
+                continue
+        
+        if pressure_sum is not None:
+            # 计算传输损失
+            TL_multi[iF, :, :] = calculate_transmission_loss(pressure_sum)
+            
+            if return_pressure:
+                Pressure[0, iF, :, :] = pressure_sum[0, 0, :, :]
+    
+    print(f"Multi-frequency calculation completed for {Nfreq} frequencies")
+    
+    if return_pressure:
+        Pressure = np.squeeze(Pressure)
+        return Pos1, TL_multi, Pressure
+    else:
+        return Pos1, TL_multi
 
 
 def write_ssp(sspfile, ssp, bathm, NZmax):
@@ -386,20 +595,59 @@ def call_Bellhop_Rays(frequency, source_depth, receiver_depths, receiver_ranges,
     # Read sound field
     return get_rays(filename + ".ray")
 
-def find_cvgcRays(rays_total):
+def find_cvgcRays(rays_total, bathymetry=None):
+    """筛选有效射线，基于声学原理的宽松筛选策略"""
     Rays = []
-    num_bnc_min = np.Inf
-    for ray in rays_total[0]:
-        if ray.num_top_bnc + ray.num_bot_bnc < num_bnc_min and max(ray.xy[1,:]) > 100:
-            num_bnc_min = ray.num_top_bnc + ray.num_bot_bnc
-
-    for ray in rays_total[0]:
-        if ray.num_top_bnc + ray.num_bot_bnc > num_bnc_min + 1:
-            continue
-        elif max(ray.xy[1,:]) < 100:
-            continue
+    
+    # 动态计算深度阈值 - 仅用于过滤明显异常的射线
+    if bathymetry is not None:
+        # 检查bathymetry对象的属性结构
+        if hasattr(bathymetry, 'd'):
+            min_bottom_depth = min(bathymetry.d)
+        elif hasattr(bathymetry, 'depth'):
+            min_bottom_depth = min(bathymetry.depth)
         else:
-            Rays.append(ray)
+            try:
+                min_bottom_depth = min(bathymetry)
+            except (TypeError, ValueError):
+                print("警告: bathymetry对象结构未知，使用默认深度阈值")
+                min_bottom_depth = 100
+        # 使用非常宽松的深度阈值，仅过滤明显异常的射线
+        # 设置为海底深度的20%，主要过滤数值计算错误产生的异常浅射线
+        depth_threshold = max(10, min_bottom_depth * 0.2)
+    else:
+        depth_threshold = 10  # 非常宽松的默认阈值
+    
+    print(f"射线筛选深度阈值: {depth_threshold:.1f}m (仅过滤异常浅射线)")
+    
+    # 简化筛选逻辑：只过滤明显无效的射线
+    valid_rays = 0
+    empty_rays = 0
+    shallow_rays = 0
+    
+    for ray in rays_total[0]:
+        # 跳过空射线（无坐标数据）
+        if ray.xy.size == 0:
+            empty_rays += 1
+            continue
+            
+        # 检查射线是否过浅（可能是计算错误）
+        max_depth = max(ray.xy[1,:])
+        if max_depth < depth_threshold:
+            shallow_rays += 1
+            continue
+        
+        # 保留所有其他射线，不限制反射次数
+        Rays.append(ray)
+        valid_rays += 1
+    
+    print(f"射线筛选统计:")
+    print(f"  - 总射线数: {len(rays_total[0])}")
+    print(f"  - 空射线: {empty_rays}")
+    print(f"  - 过浅射线 (<{depth_threshold:.1f}m): {shallow_rays}")
+    print(f"  - 有效射线: {valid_rays}")
+    print(f"  - 保留率: {valid_rays/len(rays_total[0])*100:.1f}%")
+    
     return Rays
 
 def alphadiv(NalphaRange, Rmax):

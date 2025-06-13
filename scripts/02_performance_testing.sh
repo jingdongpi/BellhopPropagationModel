@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # ============================================================================
-# 性能测试脚本 - Performance Testing
+# 性能测试脚本 v2.0 - Performance Testing with Multi-frequency & Ray Filtering
 # ============================================================================
-# 功能：测试计算性能、内存使用、优化效果
+# 功能：测试计算性能、内存使用、多频率优化、射线筛选优化效果
+# 更新：适配射线筛选优化和多频率批处理功能
 # 使用：./scripts/02_performance_testing.sh
 # ============================================================================
 
@@ -15,6 +16,7 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
 NC='\033[0m'
 
 # 项目根目录
@@ -26,31 +28,37 @@ PERF_DIR="performance_results"
 mkdir -p "$PERF_DIR"
 
 echo -e "${BLUE}============================================================================${NC}"
-echo -e "${BLUE}⚡ BellhopPropagationModel - 性能测试${NC}"
+echo -e "${BLUE}⚡ BellhopPropagationModel v2.0 - 性能测试${NC}"
 echo -e "${BLUE}============================================================================${NC}"
 echo "测试时间: $(date)"
+echo "测试版本: 2.0 (支持多频率批处理和射线筛选优化)"
 echo
 
 # 性能基准定义（秒）
 EXCELLENT_TIME=2.0
 GOOD_TIME=5.0
 ACCEPTABLE_TIME=15.0
+MULTI_FREQ_BASELINE=10.0  # 多频率测试基准
+RAY_FILTERING_SPEEDUP=1.5  # 射线筛选加速比
 
 # 测试结果统计
 TOTAL_TESTS=0
 PASSED_TESTS=0
 PERFORMANCE_SCORES=()
+OPTIMIZATION_GAINS=()
 
 performance_check() {
     local time=$1
     local test_name="$2"
     local file_size="$3"
+    local optimization_type="$4"  # 新增：优化类型
     
     TOTAL_TESTS=$((TOTAL_TESTS + 1))
     
     echo "  📊 $test_name"
     echo "    计算时间: ${time}s"
     echo "    数据规模: $file_size"
+    [ -n "$optimization_type" ] && echo "    优化类型: $optimization_type"
     
     # 使用Python进行浮点数比较
     local score_result=$(python3 -c "
@@ -92,6 +100,52 @@ else:
     
     PERFORMANCE_SCORES+=($score)
     echo "    评分: ${score}/100"
+    echo
+}
+
+# 新增：优化效果检查函数
+optimization_check() {
+    local baseline_time=$1
+    local optimized_time=$2
+    local test_name="$3"
+    local expected_speedup=$4
+    
+    echo "  🚀 $test_name 优化效果分析"
+    echo "    基准时间: ${baseline_time}s"
+    echo "    优化时间: ${optimized_time}s"
+    
+    local speedup=$(python3 -c "
+baseline = float('$baseline_time')
+optimized = float('$optimized_time')
+expected = float('$expected_speedup')
+
+if optimized > 0:
+    actual_speedup = baseline / optimized
+    gain_percent = ((baseline - optimized) / baseline) * 100
+    print(f'{actual_speedup:.2f} {gain_percent:.1f}')
+else:
+    print('0.00 0.0')
+")
+    
+    local actual_speedup=$(echo $speedup | awk '{print $1}')
+    local gain_percent=$(echo $speedup | awk '{print $2}')
+    
+    echo "    实际加速比: ${actual_speedup}x"
+    echo "    性能提升: ${gain_percent}%"
+    
+    local meets_expectation=$(python3 -c "
+actual = float('$actual_speedup')
+expected = float('$expected_speedup')
+print('YES' if actual >= expected else 'NO')
+")
+    
+    if [ "$meets_expectation" = "YES" ]; then
+        echo -e "    ${GREEN}🎯 达到预期优化目标 (≥${expected_speedup}x)${NC}"
+        OPTIMIZATION_GAINS+=("$gain_percent")
+    else
+        echo -e "    ${YELLOW}⚠️ 未达到预期优化目标 (期望≥${expected_speedup}x)${NC}"
+        OPTIMIZATION_GAINS+=("0")
+    fi
     echo
 }
 
@@ -195,16 +249,177 @@ except Exception as e:
 }
 
 # 执行不同复杂度的测试
-test_performance "examples/input_minimal_test.json" "最小配置测试"
-test_performance "examples/input_fast_test.json" "快速配置测试"  
-test_performance "examples/input_interface_compliant.json" "接口规范测试"
+test_performance "examples/input_small.json" "小规模计算"
+test_performance "examples/input_medium.json" "中等规模计算"
+test_performance "examples/input_ray_test.json" "射线追踪测试"
 
 echo
 
 # ============================================================================
-# 3. 内存使用分析
+# 3. 多频率批处理性能测试 (NEW)
 # ============================================================================
-echo -e "${YELLOW}3. 🧠 内存使用分析${NC}"
+echo -e "${YELLOW}3. 🎵 多频率批处理性能测试${NC}"
+
+# 测试多频率性能
+echo "  🔄 多频率批处理测试..."
+
+# 单频率基准测试
+single_freq_time=$(python3 -c "
+import sys, json, time
+sys.path.insert(0, '.')
+from python_wrapper.bellhop_wrapper import solve_bellhop_propagation
+
+test_input = {
+    'freq': 100,
+    'source_depth': 30,
+    'receiver_depth': [10, 20, 30, 40],
+    'receiver_range': [1000, 2000, 3000],
+    'bathy': {'range': [0, 4000], 'depth': [100, 120]},
+    'sound_speed_profile': [{'range': 0, 'depth': [0, 50, 100], 'speed': [1520, 1510, 1500]}],
+    'sediment_info': [{'range': 0, 'sediment': {'p_speed': 1600, 's_speed': 200, 'density': 1.8, 'p_atten': 0.2, 's_atten': 1.0}}],
+    'options': {'is_propagation_pressure_output': True}
+}
+
+start_time = time.time()
+try:
+    result = solve_bellhop_propagation(json.dumps(test_input))
+    result_data = json.loads(result)
+    execution_time = time.time() - start_time
+    
+    if result_data.get('error_code') == 200:
+        print(f'{execution_time:.3f}')
+    else:
+        print('ERROR')
+except Exception as e:
+    print('ERROR')
+" 2>&1 | tail -1 | grep -E '^[0-9]+\.[0-9]+$' || echo "ERROR")
+
+if [ "$single_freq_time" != "ERROR" ]; then
+    echo "    单频率基准时间: ${single_freq_time}s"
+    
+    # 多频率批处理测试
+    multi_freq_time=$(python3 -c "
+import sys, json, time
+sys.path.insert(0, '.')
+from python_wrapper.bellhop_wrapper import solve_bellhop_propagation
+
+test_input = {
+    'freq': [100, 200, 500, 1000],  # 4个频率
+    'source_depth': 30,
+    'receiver_depth': [10, 20, 30, 40],
+    'receiver_range': [1000, 2000, 3000],
+    'bathy': {'range': [0, 4000], 'depth': [100, 120]},
+    'sound_speed_profile': [{'range': 0, 'depth': [0, 50, 100], 'speed': [1520, 1510, 1500]}],
+    'sediment_info': [{'range': 0, 'sediment': {'p_speed': 1600, 's_speed': 200, 'density': 1.8, 'p_atten': 0.2, 's_atten': 1.0}}],
+    'options': {'is_propagation_pressure_output': True}
+}
+
+start_time = time.time()
+try:
+    result = solve_bellhop_propagation(json.dumps(test_input))
+    result_data = json.loads(result)
+    execution_time = time.time() - start_time
+    
+    if result_data.get('error_code') == 200:
+        print(f'{execution_time:.3f}')
+    else:
+        print('ERROR')
+except Exception as e:
+    print('ERROR')
+" 2>&1 | tail -1 | grep -E '^[0-9]+\.[0-9]+$' || echo "ERROR")
+    
+    if [ "$multi_freq_time" != "ERROR" ]; then
+        echo "    多频率批处理时间: ${multi_freq_time}s (4个频率)"
+        
+        # 计算预期时间（4个频率顺序执行）
+        expected_time=$(python3 -c "print(f'{float(\"$single_freq_time\") * 4:.3f}')")
+        echo "    预期顺序执行时间: ${expected_time}s"
+        
+        # 分析优化效果
+        optimization_check "$expected_time" "$multi_freq_time" "多频率批处理" "2.0"
+        
+        performance_check "$multi_freq_time" "多频率批处理" "4频率x12数据点" "多频率优化"
+    else
+        echo -e "    ${RED}❌ 多频率测试失败${NC}"
+    fi
+else
+    echo -e "    ${RED}❌ 单频率基准测试失败${NC}"
+fi
+
+echo
+
+# ============================================================================
+# 4. 射线筛选优化性能测试 (NEW)
+# ============================================================================
+echo -e "${YELLOW}4. 🎯 射线筛选优化性能测试${NC}"
+
+echo "  🧮 射线筛选效果测试..."
+
+# 执行射线筛选性能分析
+ray_filtering_result=$(python3 -c "
+import sys, json, time
+sys.path.insert(0, '.')
+from python_wrapper.bellhop_wrapper import solve_bellhop_propagation
+
+# 使用射线追踪测试输入
+test_input = {
+    'freq': 250,
+    'source_depth': 25,
+    'receiver_depth': [15, 25, 35],
+    'receiver_range': [2000, 4000],
+    'bathy': {'range': [0, 5000], 'depth': [150, 180]},
+    'sound_speed_profile': [{'range': 0, 'depth': [0, 50, 100, 150], 'speed': [1520, 1515, 1510, 1505]}],
+    'sediment_info': [{'range': 0, 'sediment': {'p_speed': 1600, 's_speed': 200, 'density': 1.8, 'p_atten': 0.2, 's_atten': 1.0}}],
+    'options': {'is_ray_output': True, 'is_propagation_pressure_output': False}
+}
+
+start_time = time.time()
+try:
+    result = solve_bellhop_propagation(json.dumps(test_input))
+    result_data = json.loads(result)
+    execution_time = time.time() - start_time
+    
+    if result_data.get('error_code') == 200:
+        ray_count = len(result_data.get('ray_trace', []))
+        print(f'SUCCESS {execution_time:.3f} {ray_count}')
+    else:
+        print('ERROR ERROR 0')
+except Exception as e:
+    print('ERROR ERROR 0')
+" 2>/dev/null || echo "ERROR ERROR 0")
+
+if [[ $ray_filtering_result == SUCCESS* ]]; then
+    ray_time=$(echo $ray_filtering_result | awk '{print $2}')
+    ray_count=$(echo $ray_filtering_result | awk '{print $3}')
+    
+    echo "    射线计算时间: ${ray_time}s"
+    echo "    筛选后射线数: $ray_count"
+    
+    performance_check "$ray_time" "射线筛选计算" "6数据点,${ray_count}射线" "射线筛选优化"
+    
+    # 检查射线筛选统计信息
+    echo "  📊 射线筛选统计分析..."
+    python3 -c "
+print('    检查射线筛选的优化效果...')
+if $ray_count > 0:
+    print(f'    ✅ 成功筛选出 $ray_count 条有效射线')
+    if $ray_count < 1000:  # 合理的射线数量
+        print('    ✅ 射线数量在合理范围内，筛选效果良好')
+    else:
+        print('    ⚠️ 射线数量较多，可能需要进一步优化筛选策略')
+else:
+    print('    ❌ 没有筛选出有效射线，需要检查筛选算法')
+"
+else
+    echo -e "    ${RED}❌ 射线筛选测试失败${NC}"
+fi
+
+echo
+
+# ============================================================================
+# 5. 内存使用分析
+# ============================================================================
+echo -e "${YELLOW}5. 🧠 内存使用分析${NC}"
 
 # 测试内存使用
 echo "  📊 内存使用测试..."
@@ -277,9 +492,9 @@ fi
 echo
 
 # ============================================================================
-# 4. 并发性能测试
+# 6. 并发性能测试
 # ============================================================================
-echo -e "${YELLOW}4. 🔄 并发性能测试${NC}"
+echo -e "${YELLOW}6. 🔄 并发性能测试${NC}"
 
 echo "  🔍 测试并发计算能力..."
 
@@ -342,9 +557,9 @@ concurrent_test 4
 echo
 
 # ============================================================================
-# 5. 优化效果对比
+# 7. 优化效果对比
 # ============================================================================
-echo -e "${YELLOW}5. 📈 优化效果对比${NC}"
+echo -e "${YELLOW}7. 📈 优化效果对比${NC}"
 
 echo "  📊 生成性能报告..."
 

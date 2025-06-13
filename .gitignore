@@ -205,4 +205,8 @@ cython_debug/
 .vscode/
 data/
 examples/
+integration_results/
+orchestrator_test_results/
+performance_results/
 test_results/
+validation_results/

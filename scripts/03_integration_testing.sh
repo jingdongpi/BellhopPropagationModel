@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # ============================================================================
-# 集成测试脚本 - Integration Testing
+# 集成测试脚本 v2.0 - Integration Testing with Advanced Features
 # ============================================================================
-# 功能：测试完整功能集成、端到端测试、数据流验证
+# 功能：测试完整功能集成、端到端测试、数据流验证、多频率集成、射线筛选集成
+# 更新：适配最新的射线筛选优化和多频率批处理功能
 # 使用：./scripts/03_integration_testing.sh
 # ============================================================================
 
@@ -27,29 +28,36 @@ INTEGRATION_DIR="integration_results"
 mkdir -p "$INTEGRATION_DIR"
 
 echo -e "${BLUE}============================================================================${NC}"
-echo -e "${BLUE}🔗 BellhopPropagationModel - 集成测试${NC}"
+echo -e "${BLUE}🔗 BellhopPropagationModel v2.0 - 集成测试${NC}"
 echo -e "${BLUE}============================================================================${NC}"
 echo "测试时间: $(date)"
+echo "测试版本: 2.0 (包含多频率和射线筛选集成测试)"
 echo
 
 # 测试结果统计
 TOTAL_INTEGRATIONS=0
 PASSED_INTEGRATIONS=0
 FAILED_TESTS=()
+INTEGRATION_DETAILS=()
 
 integration_check() {
     local test_name="$1"
     local result=$2
+    local details="$3"
     
     TOTAL_INTEGRATIONS=$((TOTAL_INTEGRATIONS + 1))
     
     if [ $result -eq 0 ]; then
         echo -e "  ${GREEN}✅ $test_name${NC}"
+        [ -n "$details" ] && echo "    详情: $details"
         PASSED_INTEGRATIONS=$((PASSED_INTEGRATIONS + 1))
+        INTEGRATION_DETAILS+=("✅ $test_name: $details")
         return 0
     else
         echo -e "  ${RED}❌ $test_name${NC}"
+        [ -n "$details" ] && echo "    错误: $details"
         FAILED_TESTS+=("$test_name")
+        INTEGRATION_DETAILS+=("❌ $test_name: $details")
         return 1
     fi
 }
@@ -76,9 +84,35 @@ except Exception as e:
     print(f'✗ bellhop_wrapper 模块导入失败: {e}')
     exit(1)
 
-# 测试核心计算模块
+# 测试核心计算模块 - 包含新增的多频率功能
 try:
-    from python_core.bellhop import call_Bellhop, call_Bellhop_with_pressure
+    from python_core.bellhop import call_Bellhop, call_Bellhop_multi_freq, find_cvgcRays
+    print('✓ bellhop 核心模块导入成功')
+    
+    # 验证新增的多频率函数
+    import inspect
+    sig = inspect.signature(call_Bellhop_multi_freq)
+    params = list(sig.parameters.keys())
+    if 'frequencies' in params and 'performance_mode' in params:
+        print('✓ 多频率批处理功能可用')
+    else:
+        print('✗ 多频率批处理功能不完整')
+        exit(1)
+        
+    # 验证射线筛选函数签名
+    sig_ray = inspect.signature(find_cvgcRays)
+    ray_params = list(sig_ray.parameters.keys())
+    if 'bathymetry' in ray_params:
+        print('✓ 射线筛选优化功能可用')
+    else:
+        print('✗ 射线筛选优化功能不完整')
+        exit(1)
+        
+except Exception as e:
+    print(f'✗ bellhop 核心模块导入失败: {e}')
+    exit(1)
+try:
+    from python_core.bellhop import call_Bellhop, call_Bellhop_Rays
     print('✓ bellhop 核心模块导入成功')
 except Exception as e:
     print(f'✗ bellhop 核心模块导入失败: {e}')
@@ -209,9 +243,188 @@ integration_check "输出数据格式化链" $output_formatting_result
 echo
 
 # ============================================================================
-# 3. 端到端功能测试
+# 3. 多频率批处理集成测试 (NEW)
 # ============================================================================
-echo -e "${YELLOW}3. 🔄 端到端功能测试${NC}"
+echo -e "${YELLOW}3. 🎵 多频率批处理集成测试${NC}"
+
+echo "  🔄 测试多频率输入解析和处理..."
+
+# 测试多频率集成
+python3 -c "
+import sys
+sys.path.insert(0, '.')
+sys.path.insert(0, 'python_wrapper')
+import json, time, os
+from python_wrapper.bellhop_wrapper import solve_bellhop_propagation
+
+try:
+    # 测试多频率输入文件
+    if not os.path.exists('examples/input_multi_frequency.json'):
+        # 创建多频率测试输入
+        multi_freq_input = {
+            'freq': [100, 200, 500, 1000],
+            'source_depth': 30,
+            'receiver_depth': [10, 20, 30, 40, 50],
+            'receiver_range': [1000, 2000, 3000, 4000],
+            'bathy': {'range': [0, 2000, 4000], 'depth': [100, 120, 140]},
+            'sound_speed_profile': [{'range': 0, 'depth': [0, 50, 100], 'speed': [1520, 1515, 1510]}],
+            'sediment_info': [{'range': 0, 'sediment': {'p_speed': 1600, 's_speed': 200, 'density': 1.8, 'p_atten': 0.2, 's_atten': 1.0}}],
+            'options': {'is_propagation_pressure_output': True}
+        }
+        
+        with open('examples/input_multi_frequency.json', 'w') as f:
+            json.dump(multi_freq_input, f, indent=2)
+        
+        print('✓ 创建多频率测试输入文件')
+    
+    # 执行多频率计算
+    with open('examples/input_multi_frequency.json', 'r') as f:
+        test_data = json.load(f)
+    
+    start_time = time.time()
+    result = solve_bellhop_propagation(test_data)
+    end_time = time.time()
+    
+    result_data = json.loads(result) if isinstance(result, str) else result
+    
+    if result_data.get('error_code') == 200:
+        # 验证多频率输出格式
+        freq_data = result_data.get('frequencies', result_data.get('freq', []))
+        tl_data = result_data.get('transmission_loss', [])
+        
+        # 从input_multi_frequency.json读取期望的频率数量
+        expected_freq_count = 6  # [50, 100, 150, 200, 250, 300]
+        
+        print(f'  调试信息: result_data keys = {list(result_data.keys())}')
+        print(f'  调试信息: freq_data = {freq_data}')
+        print(f'  调试信息: tl_data type = {type(tl_data)}, length = {len(tl_data) if isinstance(tl_data, list) else \"N/A\"}')
+        
+        if len(freq_data) == expected_freq_count and len(tl_data) == expected_freq_count:
+            print(f'✓ 多频率计算成功')
+            print(f'  - 计算时间: {end_time-start_time:.2f}s')
+            print(f'  - 频率数量: {len(freq_data)}')
+            print(f'  - 传输损失维度: {len(tl_data)}x{len(tl_data[0])}x{len(tl_data[0][0])}')
+            print(f'  - 频率列表: {freq_data}')
+        else:
+            print(f'✗ 多频率输出格式不正确')
+            print(f'  - 期望频率数量: {expected_freq_count}, 实际: {len(freq_data)}')
+            print(f'  - 期望TL维度: {expected_freq_count}, 实际: {len(tl_data)}')
+            if len(freq_data) == 0:
+                print(f'  - 可能的问题: frequencies和freq字段都为空或不存在')
+                print(f'  - 可用的字段: {[k for k in result_data.keys() if \"freq\" in k.lower()]}')
+            if len(tl_data) != expected_freq_count:
+                print(f'  - 可能的问题: transmission_loss格式不正确')
+            exit(1)
+    else:
+        print(f'✗ 多频率计算失败: {result_data.get(\"error_message\", \"未知错误\")}')
+        exit(1)
+        
+except Exception as e:
+    print(f'✗ 多频率集成测试失败: {e}')
+    import traceback
+    traceback.print_exc()
+    exit(1)
+" 2>&1
+multi_freq_result=$?
+integration_check "多频率批处理集成" $multi_freq_result "支持4个频率的批处理计算"
+
+echo
+
+# ============================================================================
+# 4. 射线筛选优化集成测试 (NEW)
+# ============================================================================
+echo -e "${YELLOW}4. 🎯 射线筛选优化集成测试${NC}"
+
+echo "  🧮 测试射线筛选集成功能..."
+
+# 测试射线筛选集成
+python3 -c "
+import sys
+sys.path.insert(0, '.')
+sys.path.insert(0, 'python_wrapper')
+import json, time, os
+from python_wrapper.bellhop_wrapper import solve_bellhop_propagation
+
+try:
+    # 使用射线追踪测试输入
+    if not os.path.exists('examples/input_ray_test.json'):
+        # 创建射线测试输入
+        ray_test_input = {
+            'freq': 250,
+            'source_depth': 25,
+            'receiver_depth': [15, 25, 35, 45],
+            'receiver_range': [2000, 4000, 6000],
+            'bathy': {'range': [0, 3000, 6000], 'depth': [150, 170, 200]},
+            'sound_speed_profile': [{'range': 0, 'depth': [0, 50, 100, 150], 'speed': [1520, 1515, 1510, 1505]}],
+            'sediment_info': [{'range': 0, 'sediment': {'p_speed': 1600, 's_speed': 200, 'density': 1.8, 'p_atten': 0.2, 's_atten': 1.0}}],
+            'options': {'is_ray_output': True, 'is_propagation_pressure_output': False}
+        }
+        
+        with open('examples/input_ray_test.json', 'w') as f:
+            json.dump(ray_test_input, f, indent=2)
+        
+        print('✓ 创建射线测试输入文件')
+    
+    # 执行射线筛选计算
+    with open('examples/input_ray_test.json', 'r') as f:
+        test_data = json.load(f)
+    
+    start_time = time.time()
+    result = solve_bellhop_propagation(test_data)
+    end_time = time.time()
+    
+    result_data = json.loads(result) if isinstance(result, str) else result
+    
+    if result_data.get('error_code') == 200:
+        # 验证射线输出
+        ray_trace = result_data.get('ray_trace', [])
+        
+        if ray_trace:
+            print(f'✓ 射线筛选计算成功')
+            print(f'  - 计算时间: {end_time-start_time:.2f}s')
+            print(f'  - 筛选后射线数: {len(ray_trace)}')
+            
+            # 验证射线数据格式
+            first_ray = ray_trace[0]
+            required_fields = ['alpha', 'num_top_bnc', 'num_bot_bnc', 'ray_range', 'ray_depth']
+            missing_fields = [field for field in required_fields if field not in first_ray]
+            
+            if not missing_fields:
+                print(f'  ✓ 射线数据格式完整')
+                print(f'  - 发射角度: {first_ray[\"alpha\"]}°')
+                print(f'  - 轨迹点数: {len(first_ray[\"ray_range\"])}')
+                
+                # 验证射线筛选效果
+                max_depth = max(first_ray['ray_depth'])
+                if max_depth > 50:  # 确保射线深度合理
+                    print(f'  ✓ 射线筛选效果良好 (最大深度: {max_depth}m)')
+                else:
+                    print(f'  ⚠️ 射线深度可能过浅 (最大深度: {max_depth}m)')
+            else:
+                print(f'  ✗ 射线数据格式不完整，缺少字段: {missing_fields}')
+                exit(1)
+        else:
+            print(f'✗ 射线筛选未产生有效射线')
+            exit(1)
+    else:
+        print(f'✗ 射线筛选计算失败: {result_data.get(\"error_message\", \"未知错误\")}')
+        exit(1)
+        
+except Exception as e:
+    print(f'✗ 射线筛选集成测试失败: {e}')
+    import traceback
+    traceback.print_exc()
+    exit(1)
+" 2>&1
+ray_filtering_result=$?
+integration_check "射线筛选优化集成" $ray_filtering_result "成功筛选和输出射线轨迹数据"
+
+echo
+
+# ============================================================================
+# 5. 端到端功能测试
+# ============================================================================
+echo -e "${YELLOW}5. 🔄 端到端功能测试${NC}"
 
 # 完整的端到端测试函数
 end_to_end_test() {
@@ -319,9 +532,9 @@ integration_check "接口规范端到端测试" $e2e_compliant_result
 echo
 
 # ============================================================================
-# 4. 错误处理和边界测试
+# 6. 错误处理和边界测试
 # ============================================================================
-echo -e "${YELLOW}4. 🚨 错误处理和边界测试${NC}"
+echo -e "${YELLOW}6. 🚨 错误处理和边界测试${NC}"
 
 echo "  🔍 测试错误处理机制..."
 
@@ -438,9 +651,9 @@ integration_check "边界值处理" $boundary_test_result
 echo
 
 # ============================================================================
-# 5. 数据一致性验证
+# 7. 数据一致性验证
 # ============================================================================
-echo -e "${YELLOW}5. 🔍 数据一致性验证${NC}"
+echo -e "${YELLOW}7. 🔍 数据一致性验证${NC}"
 
 echo "  📊 验证输出数据一致性..."
 
@@ -498,9 +711,9 @@ integration_check "输出数据一致性" $consistency_test_result
 echo
 
 # ============================================================================
-# 6. 性能回归测试
+# 8. 性能回归测试
 # ============================================================================
-echo -e "${YELLOW}6. ⏱️ 性能回归测试${NC}"
+echo -e "${YELLOW}8. ⏱️ 性能回归测试${NC}"
 
 echo "  📈 验证性能无回归..."
 
@@ -540,11 +753,11 @@ try:
         print(f'  - 当前时间: {current_time:.2f}s')
         print(f'  - 性能变化: {((current_time/baseline_time-1)*100):+.1f}%')
     else:
-        print(f'✗ 性能回归检测到显著降低')
-        print(f'  - 基线时间: {baseline_time:.2f}s')
-        print(f'  - 当前时间: {current_time:.2f}s')
-        print(f'  - 性能降低: {((current_time/baseline_time-1)*100):+.1f}%')
-        exit(1)
+        echo "✗ 性能回归检测到显著降低"
+        echo "  - 基线时间: ${baseline_time:.2f}s"
+        echo "  - 当前时间: ${current_time:.2f}s"
+        echo "  - 性能降低: $(( (current_time - baseline_time) * 100 / baseline_time ))%"
+        exit 1
 
 except Exception as e:
     print(f'✗ 性能回归测试失败: {e}')
@@ -604,7 +817,7 @@ echo
 # ============================================================================
 # 生成集成测试报告
 # ============================================================================
-echo -e "${YELLOW}7. 📋 生成集成测试报告${NC}"
+echo -e "${YELLOW}9. 📋 生成集成测试报告${NC}"
 
 # 创建详细的集成测试报告
 cat > "$INTEGRATION_DIR/integration_report.md" << EOF

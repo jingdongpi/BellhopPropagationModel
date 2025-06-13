@@ -74,7 +74,7 @@ def parse_input_data(input_json):
     if missing_fields:
         raise ValueError(f"缺少必需字段: {', '.join(missing_fields)}")
     
-    # 解析频率（支持单频和宽带）
+    # 解析频率（支持单频、多频和宽带）
     freq = data.get('freq')
     freq_range = data.get('freq_range')
     
@@ -86,12 +86,15 @@ def parse_input_data(input_json):
         if isinstance(freq, list):
             if not freq:  # 空列表
                 raise ValueError("频率列表不能为空")
-            freq = float(freq[0])
+            # 支持多频率数组
+            freq = [float(f) for f in freq]
+            for f in freq:
+                if f <= 0:
+                    raise ValueError("所有频率必须大于0")
         else:
             freq = float(freq)
-        
-        if freq <= 0:
-            raise ValueError("频率必须大于0")
+            if freq <= 0:
+                raise ValueError("频率必须大于0")
     elif freq_range is not None:
         # 宽带模型使用中心频率
         lower = freq_range.get('lower', 100)
@@ -358,13 +361,38 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
         'transmission_loss': process_array_to_2_decimals(TL.tolist()) if isinstance(TL, np.ndarray) else []
     }
     
+    # 处理多频率输出格式
+    if isinstance(freq, list) and len(freq) > 1:
+        # 多频率输出：添加频率信息
+        result['frequencies'] = [round_to_2_decimals(f) for f in freq]
+        result['is_multi_frequency'] = True
+        
+        # 传输损失格式：[freq_idx][depth_idx][range_idx]
+        if isinstance(TL, np.ndarray) and TL.ndim == 3:
+            # 多频率TL数据：[Nfreq, Ndepth, Nrange]
+            result['transmission_loss'] = process_array_to_2_decimals(TL.tolist())
+        elif isinstance(TL, np.ndarray) and TL.ndim == 2:
+            # 单频率格式，扩展为多频率格式
+            result['transmission_loss'] = [process_array_to_2_decimals(TL.tolist())]
+    else:
+        # 单频率输出
+        result['frequencies'] = [round_to_2_decimals(freq if not isinstance(freq, list) else freq[0])]
+        result['is_multi_frequency'] = False
+        
+        # 确保单频率TL格式正确
+        if isinstance(TL, np.ndarray) and TL.ndim == 3:
+            # 多频率数据但只有一个频率，取第一个
+            result['transmission_loss'] = process_array_to_2_decimals(TL[0].tolist())
+        elif isinstance(TL, np.ndarray):
+            result['transmission_loss'] = process_array_to_2_decimals(TL.tolist())
+    
     # 可选输出：声压
     if options and options.get('is_propagation_pressure_output', False) and pressure is not None:
         pressure_data = []
         if isinstance(pressure, np.ndarray):
             # 处理不同维度的压力数据
             if pressure.ndim == 2:
-                # 2D数组：直接处理
+                # 2D数组：单频率压力数据 [depth, range]
                 for i in range(pressure.shape[0]):
                     row = []
                     for j in range(pressure.shape[1]):
@@ -373,6 +401,32 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                             'imag': pressure[i, j].imag
                         })
                     pressure_data.append(row)
+            elif pressure.ndim == 3:
+                # 3D数组：多频率压力数据 [freq, depth, range]
+                if isinstance(freq, list) and len(freq) > 1:
+                    # 多频率格式：返回每个频率的压力数据
+                    pressure_data = []
+                    for f_idx in range(pressure.shape[0]):
+                        freq_pressure = []
+                        for i in range(pressure.shape[1]):
+                            row = []
+                            for j in range(pressure.shape[2]):
+                                row.append({
+                                    'real': pressure[f_idx, i, j].real,
+                                    'imag': pressure[f_idx, i, j].imag
+                                })
+                            freq_pressure.append(row)
+                        pressure_data.append(freq_pressure)
+                else:
+                    # 单频率情况：取第一个频率
+                    for i in range(pressure.shape[1]):
+                        row = []
+                        for j in range(pressure.shape[2]):
+                            row.append({
+                                'real': pressure[0, i, j].real,
+                                'imag': pressure[0, i, j].imag
+                            })
+                        pressure_data.append(row)
             elif pressure.ndim == 4:
                 # 4D数组：取第一个频率和第一个声源位置
                 p_2d = pressure[0, 0, :, :] if pressure.shape[0] > 0 and pressure.shape[1] > 0 else pressure.reshape(pressure.shape[-2], pressure.shape[-1])
@@ -403,46 +457,38 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
     if options and options.get('is_ray_output', False) and rays is not None:
         ray_trace_data = []
         if rays:
-            # rays 是一个嵌套列表：[source_collection]，其中每个 source_collection 包含多条射线
-            for source_rays in rays:  # 遍历每个源位置的射线集合
-                for ray in source_rays:  # 遍历该源位置的每条射线
-                    # 从射线对象中提取数据，注意属性名称
-                    launch_angle = getattr(ray, 'src_ang', getattr(ray, 'alpha', 0))  # 发射角度
-                    ray_xy = getattr(ray, 'xy', np.array([[], []]))  # 射线轨迹坐标
+            # rays 是一个射线列表（来自 find_cvgcRays 函数的返回值）
+            # 需要直接遍历射线，而不是期望嵌套结构
+            for ray in rays:  # 直接遍历射线列表
+                # 从射线对象中提取数据，注意属性名称
+                launch_angle = getattr(ray, 'src_ang', getattr(ray, 'alpha', 0))  # 发射角度
+                ray_xy = getattr(ray, 'xy', np.array([[], []]))  # 射线轨迹坐标
+                
+                # 调试：检查射线数据的原始值
+                if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
+                    print(f"Debug: ray_xy shape: {ray_xy.shape}")
+                    print(f"Debug: ray_xy[0] (range) sample: {ray_xy[0, :5] if ray_xy.shape[1] > 5 else ray_xy[0, :]}")
+                    print(f"Debug: ray_xy[1] (depth) sample: {ray_xy[1, :5] if ray_xy.shape[1] > 5 else ray_xy[1, :]}")
+                    print(f"Debug: max depth in ray: {np.max(ray_xy[1, :])}")
+                    print(f"Debug: min depth in ray: {np.min(ray_xy[1, :])}")
+                
+                # 转换坐标单位和精度：距离和深度都保持m（整数）
+                if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
+                    ray_range_m_data = ray_xy[0, :]  # 距离（米）
+                    ray_depth_m = ray_xy[1, :]       # 深度（米）
                     
-                    # 调试：检查射线数据的原始值
-                    if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
-                        print(f"Debug: ray_xy shape: {ray_xy.shape}")
-                        print(f"Debug: ray_xy[0] (range) sample: {ray_xy[0, :5] if ray_xy.shape[1] > 5 else ray_xy[0, :]}")
-                        print(f"Debug: ray_xy[1] (depth) sample: {ray_xy[1, :5] if ray_xy.shape[1] > 5 else ray_xy[1, :]}")
-                        print(f"Debug: max depth in ray: {np.max(ray_xy[1, :])}")
-                        print(f"Debug: min depth in ray: {np.min(ray_xy[1, :])}")
+                    # 转换为整数
+                    ray_range_m = [int(round(r)) for r in ray_range_m_data]  # 距离转为整数（不需要乘1000）
+                    ray_depth_m_int = [int(round(d)) for d in ray_depth_m]   # 深度转为整数
                     
-                    # 转换坐标单位和精度：距离和深度都保持m（整数）
-                    if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
-                        ray_range_m_data = ray_xy[0, :]  # 距离（米）
-                        ray_depth_m = ray_xy[1, :]       # 深度（米）
-                        
-                        # 检查数据是否合理
-                        max_depth = np.max(ray_depth_m) if len(ray_depth_m) > 0 else 0
-                        if max_depth < 200:  # 如果最大深度小于200m，可能有问题
-                            print(f"Warning: 射线最大深度只有 {max_depth:.1f}m，这可能不合理")
-                            print(f"Warning: 检查是否将角度数据错误地作为深度数据")
-                            print(f"Warning: ray_xy[0] 范围: {np.min(ray_range_m_data):.3f} - {np.max(ray_range_m_data):.3f}")
-                            print(f"Warning: ray_xy[1] 范围: {np.min(ray_depth_m):.3f} - {np.max(ray_depth_m):.3f}")
-                        
-                        # 转换为整数
-                        ray_range_m = [int(round(r)) for r in ray_range_m_data]  # 距离转为整数（不需要乘1000）
-                        ray_depth_m_int = [int(round(d)) for d in ray_depth_m]   # 深度转为整数
-                        
-                        ray_info = {
-                            'alpha': round_to_2_decimals(launch_angle),
-                            'num_top_bnc': int(getattr(ray, 'num_top_bnc', 0)),
-                            'num_bot_bnc': int(getattr(ray, 'num_bot_bnc', 0)),
-                            'ray_range': ray_range_m,
-                            'ray_depth': ray_depth_m_int
-                        }
-                        ray_trace_data.append(ray_info)
+                    ray_info = {
+                        'alpha': round_to_2_decimals(launch_angle),
+                        'num_top_bnc': int(getattr(ray, 'num_top_bnc', 0)),
+                        'num_bot_bnc': int(getattr(ray, 'num_bot_bnc', 0)),
+                        'ray_range': ray_range_m,
+                        'ray_depth': ray_depth_m_int
+                    }
+                    ray_trace_data.append(ray_info)
         result['ray_trace'] = ray_trace_data
     else:
         result['ray_trace'] = []
@@ -483,6 +529,7 @@ def solve_bellhop_propagation(input_json):
         
         call_Bellhop = bellhop.call_Bellhop
         call_Bellhop_Rays = bellhop.call_Bellhop_Rays
+        call_Bellhop_multi_freq = bellhop.call_Bellhop_multi_freq
         
         # 解析输入参数（更新后的函数）
         freq, sd, rd, bathm, ssp, sed, base, options = parse_input_data(input_json)
@@ -496,41 +543,52 @@ def solve_bellhop_propagation(input_json):
         pressure = None
         rays = None
         
+        # 统一处理：将单个频率转换为列表格式，这样可以统一使用 multi_freq 函数
+        if not isinstance(freq, list):
+            freq = [freq]  # 单个频率转换为单元素列表
+        
+        # 检测是否为多频率输入（用于输出格式判断）
+        is_multi_freq = len(freq) > 1
+        
         # 根据选项决定计算类型
         if options.get('is_ray_output', False):
-            # 直接进行射线追踪计算，不设置数据集大小限制
+            # 射线追踪计算 - 目前射线追踪不支持多频率，使用第一个频率
+            ray_freq = freq[0]
             try:
                 # 计算射线轨迹 - 传递射线参数
-                rays = call_Bellhop_Rays(freq, sd, rd, receiver_range, bathm, ssp, sed, base,
-                                       beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
+                rays_total = call_Bellhop_Rays(ray_freq, sd, rd, receiver_range, bathm, ssp, sed, base,
+                                             beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
+                
+                # 导入射线筛选函数
+                from python_core.bellhop import find_cvgcRays
+                
+                # 筛选收敛射线，传递海底深度信息
+                rays = find_cvgcRays(rays_total, bathm)
+                
                 print(f"Ray tracing completed, receiver depth points: {len(rd)}, max range: {bathm.r[-1]*1000:.0f}m")
             except Exception as e:
                 print(f"Ray tracing calculation failed: {str(e)}")
                 rays = []  # 如果失败，返回空列表
             
-            # 同时计算传输损失
+            # 同时计算传输损失 - 统一使用 multi_freq 函数
             if options.get('is_propagation_pressure_output', False):
-                # 需要压力数据，使用性能模式 - 传递射线参数
-                pos, TL, pressure = call_Bellhop(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
-                                                return_pressure=True, performance_mode=False,
-                                                beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
+                pos, TL, pressure = call_Bellhop_multi_freq(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
+                                                           return_pressure=True, performance_mode=False,
+                                                           beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
             else:
-                # 标准模式，不返回压力数据 - 传递射线参数
-                pos, TL = call_Bellhop(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
-                                     return_pressure=False, performance_mode=False,
-                                     beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
+                pos, TL = call_Bellhop_multi_freq(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
+                                                 return_pressure=False, performance_mode=False,
+                                                 beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
         else:
-            # 只计算传输损失
+            # 只计算传输损失 - 统一使用 multi_freq 函数
             if options.get('is_propagation_pressure_output', False):
-                # 需要压力数据，使用性能模式 - 传递射线参数
-                pos, TL, pressure = call_Bellhop(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
-                                                return_pressure=True, performance_mode=False,
-                                                beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
+                pos, TL, pressure = call_Bellhop_multi_freq(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
+                                                           return_pressure=True, performance_mode=False,
+                                                           beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
             else:
-                # 标准模式，不返回压力数据 - 传递射线参数
-                pos, TL = call_Bellhop(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
-                                     return_pressure=False, performance_mode=False,
-                                     beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
+                pos, TL = call_Bellhop_multi_freq(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
+                                                 return_pressure=False, performance_mode=False,
+                                                 beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
         
         # 格式化输出
         return format_output_data(pos, TL, freq, pressure, rays, options)
