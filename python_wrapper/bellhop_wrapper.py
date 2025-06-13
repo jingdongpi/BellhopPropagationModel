@@ -263,8 +263,13 @@ def parse_input_data(input_json):
     # **新增：解析其他参数**
     coherent_para = data.get('coherent_para', 'C')  # 默认相干
     is_propagation_pressure_output = data.get('is_propagation_pressure_output', False)
+    
+    # 解析射线模型参数 - 根据接口定义只有ray_model_para
     ray_model_para = data.get('ray_model_para', {})
     is_ray_output = ray_model_para.get('is_ray_output', False)
+    beam_number = ray_model_para.get('beam_number', None)
+    grazing_high = ray_model_para.get('grazing_high', None)  # 掠射角上限
+    grazing_low = ray_model_para.get('grazing_low', None)    # 掠射角下限
     
     return freq, sd, rd, bathm, ssp, sed, base, {
         'coherent_para': coherent_para,
@@ -272,7 +277,10 @@ def parse_input_data(input_json):
         'is_ray_output': is_ray_output,
         'receiver_range': receiver_range,
         'freq_range': freq_range,
-        'ray_model_para': ray_model_para
+        'ray_model_para': ray_model_para,
+        'beam_number': beam_number,
+        'grazing_high': grazing_high,
+        'grazing_low': grazing_low
     }
 
 def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, error_code=200, error_message=""):
@@ -281,43 +289,34 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
     # 完全避免科学计数法的JSON编码器
     class NoScientificJSONEncoder(json.JSONEncoder):
         def encode(self, obj):
-            """递归编码对象，确保完全没有科学计数法"""
-            return self._encode_recursive(obj)
+            """重写encode方法，确保所有浮点数都使用固定小数点格式"""
+            return self._encode_obj(obj)
         
-        def _encode_recursive(self, obj):
-            """递归处理所有类型的对象"""
+        def _encode_obj(self, obj):
+            """递归编码对象"""
             if isinstance(obj, float):
-                # 浮点数强制使用固定小数点格式
+                # 浮点数格式化为固定小数点格式
                 if abs(obj) < 1e-10:
                     return "0.000000"
                 elif abs(obj) >= 1:
                     return f"{obj:.2f}"
                 else:
                     return f"{obj:.6f}"
-            elif isinstance(obj, str):
-                # 字符串处理：如果是数值字符串则不加引号，否则加引号
-                try:
-                    float(obj)
-                    return obj  # 数值字符串直接返回
-                except ValueError:
-                    return json.dumps(obj)  # 普通字符串加引号
             elif isinstance(obj, dict):
-                # 字典处理
                 items = []
                 for k, v in obj.items():
                     key_str = json.dumps(k)
-                    val_str = self._encode_recursive(v)
+                    val_str = self._encode_obj(v)
                     items.append(f"{key_str}: {val_str}")
                 return "{" + ", ".join(items) + "}"
             elif isinstance(obj, (list, tuple)):
-                # 列表/元组处理
-                items = [self._encode_recursive(item) for item in obj]
+                items = [self._encode_obj(item) for item in obj]
                 return "[" + ", ".join(items) + "]"
-            elif isinstance(obj, (int, bool)) or obj is None:
-                # 整数、布尔值、None直接使用默认处理
+            elif isinstance(obj, str):
+                # 字符串直接使用json.dumps处理
                 return json.dumps(obj)
             else:
-                # 其他类型尝试默认处理
+                # 其他类型（int, bool, None等）使用默认处理
                 return json.dumps(obj)
     
     if error_code != 200:
@@ -337,19 +336,6 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
         if isinstance(value, (int, float)):
             return round(float(value), 2)
         return value
-    
-    # 辅助函数：将数值转换为保留6位小数的字符串（用于压力数据）
-    def round_to_6_decimals(value):
-        if isinstance(value, (int, float)):
-            # 直接格式化为字符串，避免任何可能的科学计数法
-            return f"{float(value):.6f}"
-        elif isinstance(value, complex):
-            # 对于复数，应该分别处理实部和虚部
-            print(f"Warning: round_to_6_decimals received complex number: {value}")
-            return f"{float(value.real):.6f}"
-        else:
-            print(f"pressure value is not numeric: {type(value)}")
-        return "0.000000"
     
     def process_array_to_2_decimals(arr):
         """递归处理多维数组，确保所有数值都保留2位小数"""
@@ -383,8 +369,8 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                     row = []
                     for j in range(pressure.shape[1]):
                         row.append({
-                            'real': round_to_6_decimals(pressure[i, j].real),
-                            'imag': round_to_6_decimals(pressure[i, j].imag)
+                            'real': pressure[i, j].real,
+                            'imag': pressure[i, j].imag
                         })
                     pressure_data.append(row)
             elif pressure.ndim == 4:
@@ -394,8 +380,8 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                     row = []
                     for j in range(p_2d.shape[1]):
                         row.append({
-                            'real': round_to_6_decimals(p_2d[i, j].real),
-                            'imag': round_to_6_decimals(p_2d[i, j].imag)
+                            'real': p_2d[i, j].real,
+                            'imag': p_2d[i, j].imag
                         })
                     pressure_data.append(row)
             else:
@@ -405,8 +391,8 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                     row = []
                     for j in range(p_flat.shape[1]):
                         row.append({
-                            'real': round_to_6_decimals(p_flat[i, j].real),
-                            'imag': round_to_6_decimals(p_flat[i, j].imag)
+                            'real': p_flat[i, j].real,
+                            'imag': p_flat[i, j].imag
                         })
                     pressure_data.append(row)
         result['propagation_pressure'] = pressure_data
@@ -424,21 +410,37 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                     launch_angle = getattr(ray, 'src_ang', getattr(ray, 'alpha', 0))  # 发射角度
                     ray_xy = getattr(ray, 'xy', np.array([[], []]))  # 射线轨迹坐标
                     
-                    # 转换坐标单位：距离从km转为m，深度保持m
+                    # 调试：检查射线数据的原始值
                     if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
-                        ray_range_km = ray_xy[0, :]  # 距离（km）
-                        ray_depth_m = ray_xy[1, :]   # 深度（m）
+                        print(f"Debug: ray_xy shape: {ray_xy.shape}")
+                        print(f"Debug: ray_xy[0] (range) sample: {ray_xy[0, :5] if ray_xy.shape[1] > 5 else ray_xy[0, :]}")
+                        print(f"Debug: ray_xy[1] (depth) sample: {ray_xy[1, :5] if ray_xy.shape[1] > 5 else ray_xy[1, :]}")
+                        print(f"Debug: max depth in ray: {np.max(ray_xy[1, :])}")
+                        print(f"Debug: min depth in ray: {np.min(ray_xy[1, :])}")
+                    
+                    # 转换坐标单位和精度：距离和深度都保持m（整数）
+                    if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
+                        ray_range_m_data = ray_xy[0, :]  # 距离（米）
+                        ray_depth_m = ray_xy[1, :]       # 深度（米）
                         
-                        # 距离转换为米，并保留2位小数
-                        ray_range_m = [round_to_2_decimals(r) for r in ray_range_km]
-                        ray_depth_m_rounded = [round_to_2_decimals(d) for d in ray_depth_m]
+                        # 检查数据是否合理
+                        max_depth = np.max(ray_depth_m) if len(ray_depth_m) > 0 else 0
+                        if max_depth < 200:  # 如果最大深度小于200m，可能有问题
+                            print(f"Warning: 射线最大深度只有 {max_depth:.1f}m，这可能不合理")
+                            print(f"Warning: 检查是否将角度数据错误地作为深度数据")
+                            print(f"Warning: ray_xy[0] 范围: {np.min(ray_range_m_data):.3f} - {np.max(ray_range_m_data):.3f}")
+                            print(f"Warning: ray_xy[1] 范围: {np.min(ray_depth_m):.3f} - {np.max(ray_depth_m):.3f}")
+                        
+                        # 转换为整数
+                        ray_range_m = [int(round(r)) for r in ray_range_m_data]  # 距离转为整数（不需要乘1000）
+                        ray_depth_m_int = [int(round(d)) for d in ray_depth_m]   # 深度转为整数
                         
                         ray_info = {
                             'alpha': round_to_2_decimals(launch_angle),
                             'num_top_bnc': int(getattr(ray, 'num_top_bnc', 0)),
                             'num_bot_bnc': int(getattr(ray, 'num_bot_bnc', 0)),
                             'ray_range': ray_range_m,
-                            'ray_depth': ray_depth_m_rounded
+                            'ray_depth': ray_depth_m_int
                         }
                         ray_trace_data.append(ray_info)
         result['ray_trace'] = ray_trace_data
@@ -485,8 +487,11 @@ def solve_bellhop_propagation(input_json):
         # 解析输入参数（更新后的函数）
         freq, sd, rd, bathm, ssp, sed, base, options = parse_input_data(input_json)
         
-        # 从options中提取receiver_range
+        # 从options中提取射线参数
         receiver_range = options.get('receiver_range', [])
+        beam_number = options.get('beam_number')
+        grazing_high = options.get('grazing_high')
+        grazing_low = options.get('grazing_low')
         
         pressure = None
         rays = None
@@ -495,8 +500,9 @@ def solve_bellhop_propagation(input_json):
         if options.get('is_ray_output', False):
             # 直接进行射线追踪计算，不设置数据集大小限制
             try:
-                # 计算射线轨迹 - 使用新的参数顺序
-                rays = call_Bellhop_Rays(freq, sd, rd, receiver_range, bathm, ssp, sed, base)
+                # 计算射线轨迹 - 传递射线参数
+                rays = call_Bellhop_Rays(freq, sd, rd, receiver_range, bathm, ssp, sed, base,
+                                       beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
                 print(f"Ray tracing completed, receiver depth points: {len(rd)}, max range: {bathm.r[-1]*1000:.0f}m")
             except Exception as e:
                 print(f"Ray tracing calculation failed: {str(e)}")
@@ -504,23 +510,27 @@ def solve_bellhop_propagation(input_json):
             
             # 同时计算传输损失
             if options.get('is_propagation_pressure_output', False):
-                # 需要压力数据，使用性能模式
+                # 需要压力数据，使用性能模式 - 传递射线参数
                 pos, TL, pressure = call_Bellhop(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
-                                                return_pressure=True, performance_mode=False)
+                                                return_pressure=True, performance_mode=False,
+                                                beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
             else:
-                # 标准模式，不返回压力数据
+                # 标准模式，不返回压力数据 - 传递射线参数
                 pos, TL = call_Bellhop(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
-                                     return_pressure=False, performance_mode=False)
+                                     return_pressure=False, performance_mode=False,
+                                     beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
         else:
             # 只计算传输损失
             if options.get('is_propagation_pressure_output', False):
-                # 需要压力数据，使用性能模式
+                # 需要压力数据，使用性能模式 - 传递射线参数
                 pos, TL, pressure = call_Bellhop(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
-                                                return_pressure=True, performance_mode=False)
+                                                return_pressure=True, performance_mode=False,
+                                                beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
             else:
-                # 标准模式，不返回压力数据
+                # 标准模式，不返回压力数据 - 传递射线参数
                 pos, TL = call_Bellhop(freq, sd, rd, receiver_range, bathm, ssp, sed, base, 
-                                     return_pressure=False, performance_mode=False)
+                                     return_pressure=False, performance_mode=False,
+                                     beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
         
         # 格式化输出
         return format_output_data(pos, TL, freq, pressure, rays, options)

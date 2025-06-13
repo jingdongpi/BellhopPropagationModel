@@ -78,7 +78,8 @@ def calculate_transmission_loss(pressure, min_db_threshold=-250.0):
 
 def call_Bellhop(frequency, source_depth, receiver_depths, receiver_ranges, 
                  bathymetry, sound_speed_profile, sediment, bottom_params,
-                 return_pressure=False, performance_mode=False):
+                 return_pressure=False, performance_mode=False, 
+                 beam_number=None, grazing_high=None, grazing_low=None):
     """
     统一的Bellhop计算函数
     
@@ -93,6 +94,9 @@ def call_Bellhop(frequency, source_depth, receiver_depths, receiver_ranges,
         bottom_params: 底质参数
         return_pressure: 是否返回压力数据，默认False
         performance_mode: 性能模式，True时减少计算量，默认False
+        beam_number: 用户指定的射线数量，默认None（自动计算）
+        grazing_high: 掠射角上限（度），默认None
+        grazing_low: 掠射角下限（度），默认None
     
     Returns:
         如果return_pressure=False: (Pos1, TL)
@@ -169,37 +173,71 @@ def call_Bellhop(frequency, source_depth, receiver_depths, receiver_ranges,
     top = TopBndry(Opt_top)
     bdy = Bndry(top, bottom)
     
-    # Beam params - 根据性能模式调整参数
+    # Beam params - 使用用户提供的参数或默认计算
     run_type = 'C'  # incoherently sum beams, see AT docs for more info
-    if performance_mode:
-        # **性能模式：减少角度分段数和声线数量**
-        NAlphaRange = 6  # 减少角度分段数
-        totalBeams = min(200, beamsnumber(frequency, Rmax, max(bathymetry.d)))  # 限制最大声线数
-    else:
-        # **标准模式：完整精度计算**
-        NAlphaRange = 12
-        totalBeams = beamsnumber(frequency, Rmax, max(bathymetry.d))
     
-    Alpha = alphadiv(NAlphaRange, Rmax)  # min and max launch angle
+    # 使用用户提供的射线数量或自动计算
+    if beam_number is not None and beam_number > 0:
+        totalBeams = int(beam_number)
+        print(f"使用用户指定的射线数量: {totalBeams}")
+    else:
+        if performance_mode:
+            # **性能模式：减少角度分段数和声线数量**
+            totalBeams = min(200, beamsnumber(frequency, Rmax, max(bathymetry.d)))  # 限制最大声线数
+        else:
+            # **标准模式：完整精度计算**
+            totalBeams = beamsnumber(frequency, Rmax, max(bathymetry.d))
+        print(f"自动计算的射线数量: {totalBeams}")
+    
+    # 使用用户提供的掠射角范围或自动计算
+    if grazing_low is not None and grazing_high is not None:
+        # 使用用户提供的角度范围
+        Alpha = [float(grazing_low), float(grazing_high)]
+        NAlphaRange = 2  # 直接使用用户提供的范围，不再分段
+        print(f"使用用户指定的掠射角范围: {grazing_low}° 到 {grazing_high}°")
+    else:
+        # 自动计算角度范围
+        if performance_mode:
+            NAlphaRange = 6  # 减少角度分段数
+        else:
+            NAlphaRange = 12
+        Alpha = alphadiv(NAlphaRange, Rmax)  # min and max launch angle
+        print(f"自动计算的掠射角范围: {Alpha[0]:.1f}° 到 {Alpha[-1]:.1f}°")
+        
     box = Box(Zmax, max(bathymetry.r))  # bound the region you let the beams go, depth in meters and range in km
     deltas = 0  # length step of ray trace, 0 means automatically choose
 
     # Write *.env file
     ialpha = 0
     Filenames = []
-    for iAlphaRange in range(len(Alpha) - 1):
-        alpha = np.array([float(Alpha[iAlphaRange]), float(Alpha[iAlphaRange + 1])])
-        # 确保计算中的数值类型正确，修复类型错误
-        alpha_diff = float(alpha[1] - alpha[0])
-        nbeams = int(totalBeams * alpha_diff / 180.0)
-        # 确保nbeams至少为1
-        nbeams = max(1, nbeams)
-        beam = Beam(RunType=run_type, Nbeams=nbeams, alpha=alpha, box=box, deltas=deltas)  # package
-        filenameI = filename + str(iAlphaRange)
+    
+    # 根据Alpha的长度确定处理方式
+    if len(Alpha) == 2:
+        # 用户指定的角度范围，直接使用
+        alpha = np.array([float(Alpha[0]), float(Alpha[1])])
+        nbeams = totalBeams
+        beam = Beam(RunType=run_type, Nbeams=nbeams, alpha=alpha, box=box, deltas=deltas)
+        filenameI = filename + '0'
         write_env(filenameI + '.env', 'BELLHOP', 'Pekeris profile', frequency, sspB, bdy, pos, beam, cint_obj, Rmax)
         write_ssp(filenameI, sound_speed_profile, bathymetry, NZmax)
         write_bathy(filenameI, bathymetry)
         Filenames.append(filenameI)
+        NAlphaRange = 1  # 只有一个角度范围
+    else:
+        # 自动计算的多个角度分段
+        for iAlphaRange in range(len(Alpha) - 1):
+            alpha = np.array([float(Alpha[iAlphaRange]), float(Alpha[iAlphaRange + 1])])
+            # 确保计算中的数值类型正确，修复类型错误
+            alpha_diff = float(alpha[1] - alpha[0])
+            nbeams = int(totalBeams * alpha_diff / 180.0)
+            # 确保nbeams至少为1
+            nbeams = max(1, nbeams)
+            beam = Beam(RunType=run_type, Nbeams=nbeams, alpha=alpha, box=box, deltas=deltas)
+            filenameI = filename + str(iAlphaRange)
+            write_env(filenameI + '.env', 'BELLHOP', 'Pekeris profile', frequency, sspB, bdy, pos, beam, cint_obj, Rmax)
+            write_ssp(filenameI, sound_speed_profile, bathymetry, NZmax)
+            write_bathy(filenameI, bathymetry)
+            Filenames.append(filenameI)
 
     pool = Pool(NAlphaRange)
     pool.map(call_Bellhop_p, Filenames)
@@ -237,7 +275,8 @@ def call_Bellhop(frequency, source_depth, receiver_depths, receiver_ranges,
             return default_pos, TL
 
 def call_Bellhop_Rays(frequency, source_depth, receiver_depths, receiver_ranges,
-                      bathymetry, sound_speed_profile, sediment, bottom_params):
+                      bathymetry, sound_speed_profile, sediment, bottom_params,
+                      beam_number=None, grazing_high=None, grazing_low=None):
     """
     Bellhop ray tracing calculation function
     
@@ -250,6 +289,9 @@ def call_Bellhop_Rays(frequency, source_depth, receiver_depths, receiver_ranges,
         sound_speed_profile: sound speed profile
         sediment: sediment layer data
         bottom_params: bottom parameters
+        beam_number: 用户指定的射线数量，默认None（自动计算）
+        grazing_high: 掠射角上限（度），默认None
+        grazing_low: 掠射角下限（度），默认None
     
     Returns:
         ray tracing results
@@ -257,9 +299,10 @@ def call_Bellhop_Rays(frequency, source_depth, receiver_depths, receiver_ranges,
     # Source and receiving position
     filename = 'data/tmp/cz'  # 修复文件名路径
     
-    # **确保目录存在**
-    os.makedirs('data/tmp', exist_ok=True)
-      # **Always use user-provided precise grid data**    # receiver_depths is already the user-provided depth grid, receiver_ranges is the user-provided range grid
+    # **确保目录存在**    os.makedirs('data/tmp', exist_ok=True)
+    
+    # **Always use user-provided precise grid data**
+    # receiver_depths is already the user-provided depth grid, receiver_ranges is the user-provided range grid
     ran = np.array(receiver_ranges) / 1000.0  # Convert input meters to km for Bellhop internal use
     RD = np.array(receiver_depths)  # Keep receiver depths in original units (meters)
     Rmax = max(ran)  # Maximum range in km for internal calculations
@@ -311,12 +354,28 @@ def call_Bellhop_Rays(frequency, source_depth, receiver_depths, receiver_ranges,
     bottom = BotBndry(Opt_bot, hs)
     top = TopBndry(Opt_top)
     bdy = Bndry(top, bottom)
-    # Beam params
-    nbeams = 301
-    alpha = np.linspace(-10, 10, 2)  # min and max launch angle -20 degrees to 20 degrees
+    
+    # Beam params - 使用用户提供的参数或默认值
+    run_type = 'R'  # ray trace mode
+    
+    # 使用用户提供的射线数量或默认值
+    if beam_number is not None and beam_number > 0:
+        nbeams = int(beam_number)
+        print(f"使用用户指定的射线数量: {nbeams}")
+    else:
+        nbeams = 301  # 默认射线数量
+        print(f"使用默认射线数量: {nbeams}")
+    
+    # 使用用户提供的掠射角范围或默认值
+    if grazing_low is not None and grazing_high is not None:
+        alpha = np.array([float(grazing_low), float(grazing_high)])
+        print(f"使用用户指定的掠射角范围: {grazing_low}° 到 {grazing_high}°")
+    else:
+        alpha = np.linspace(-10, 10, 2)  # 默认角度范围 -10° 到 10°
+        print(f"使用默认掠射角范围: {alpha[0]:.1f}° 到 {alpha[1]:.1f}°")
+        
     box = Box(Zmax, max(bathymetry.r))  # bound the region you let the beams go, depth in meters and range in km
     deltas = 0  # length step of ray trace, 0 means automatically choose
-    run_type = 'R'
     beam = Beam(RunType=run_type, Nbeams=nbeams, alpha=alpha, box=box, deltas=deltas)  # package
 
     # Write *.env file
