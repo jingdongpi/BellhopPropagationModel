@@ -277,6 +277,49 @@ def parse_input_data(input_json):
 
 def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, error_code=200, error_message=""):
     """格式化输出数据 - 按照接口规范完整实现，小数精度保留2位"""
+    
+    # 完全避免科学计数法的JSON编码器
+    class NoScientificJSONEncoder(json.JSONEncoder):
+        def encode(self, obj):
+            """递归编码对象，确保完全没有科学计数法"""
+            return self._encode_recursive(obj)
+        
+        def _encode_recursive(self, obj):
+            """递归处理所有类型的对象"""
+            if isinstance(obj, float):
+                # 浮点数强制使用固定小数点格式
+                if abs(obj) < 1e-10:
+                    return "0.000000"
+                elif abs(obj) >= 1:
+                    return f"{obj:.2f}"
+                else:
+                    return f"{obj:.6f}"
+            elif isinstance(obj, str):
+                # 字符串处理：如果是数值字符串则不加引号，否则加引号
+                try:
+                    float(obj)
+                    return obj  # 数值字符串直接返回
+                except ValueError:
+                    return json.dumps(obj)  # 普通字符串加引号
+            elif isinstance(obj, dict):
+                # 字典处理
+                items = []
+                for k, v in obj.items():
+                    key_str = json.dumps(k)
+                    val_str = self._encode_recursive(v)
+                    items.append(f"{key_str}: {val_str}")
+                return "{" + ", ".join(items) + "}"
+            elif isinstance(obj, (list, tuple)):
+                # 列表/元组处理
+                items = [self._encode_recursive(item) for item in obj]
+                return "[" + ", ".join(items) + "]"
+            elif isinstance(obj, (int, bool)) or obj is None:
+                # 整数、布尔值、None直接使用默认处理
+                return json.dumps(obj)
+            else:
+                # 其他类型尝试默认处理
+                return json.dumps(obj)
+    
     if error_code != 200:
         return json.dumps({
             'error_code': error_code,
@@ -287,7 +330,7 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
             'propagation_pressure': [],
             'ray_trace': [],
             'time_wave': {}
-        })
+        }, cls=NoScientificJSONEncoder)
     
     # 辅助函数：将数值转换为保留2位小数的浮点数
     def round_to_2_decimals(value):
@@ -295,22 +338,37 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
             return round(float(value), 2)
         return value
     
+    # 辅助函数：将数值转换为保留6位小数的字符串（用于压力数据）
+    def round_to_6_decimals(value):
+        if isinstance(value, (int, float)):
+            # 直接格式化为字符串，避免任何可能的科学计数法
+            return f"{float(value):.6f}"
+        elif isinstance(value, complex):
+            # 对于复数，应该分别处理实部和虚部
+            print(f"Warning: round_to_6_decimals received complex number: {value}")
+            return f"{float(value.real):.6f}"
+        else:
+            print(f"pressure value is not numeric: {type(value)}")
+        return "0.000000"
+    
     def process_array_to_2_decimals(arr):
-        if isinstance(arr, np.ndarray):
-            return [[round_to_2_decimals(item) for item in row] if isinstance(row, (list, np.ndarray)) 
-                   else round_to_2_decimals(row) for row in arr]
-        elif isinstance(arr, list):
-            return [[round_to_2_decimals(item) for item in row] if isinstance(row, (list, np.ndarray)) 
-                   else round_to_2_decimals(row) for row in arr]
-        return arr
+        """递归处理多维数组，确保所有数值都保留2位小数"""
+        if isinstance(arr, (int, float)):
+            return round_to_2_decimals(arr)
+        elif isinstance(arr, (list, tuple)):
+            return [process_array_to_2_decimals(item) for item in arr]
+        elif isinstance(arr, np.ndarray):
+            return [process_array_to_2_decimals(item) for item in arr.tolist()]
+        else:
+            return arr
     
     # 基本输出
     result = {
         'error_code': 200,
         'error_message': '',
         'receiver_depth': [round_to_2_decimals(d) for d in pos.r.depth.tolist()] if hasattr(pos.r, 'depth') else [],
-        # **Distance units: Bellhop internal uses km, convert back to meters for output**
-        'receiver_range': [round_to_2_decimals(r * 1000) for r in pos.r.range.tolist()] if hasattr(pos.r, 'range') else [],
+        # **Debug: Check what pos.r.range actually contains**
+        'receiver_range': [round_to_2_decimals(r) for r in pos.r.range.tolist()] if hasattr(pos.r, 'range') else [],
         'transmission_loss': process_array_to_2_decimals(TL.tolist()) if isinstance(TL, np.ndarray) else []
     }
     
@@ -325,8 +383,8 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                     row = []
                     for j in range(pressure.shape[1]):
                         row.append({
-                            'real': round_to_2_decimals(pressure[i, j].real),
-                            'imag': round_to_2_decimals(pressure[i, j].imag)
+                            'real': round_to_6_decimals(pressure[i, j].real),
+                            'imag': round_to_6_decimals(pressure[i, j].imag)
                         })
                     pressure_data.append(row)
             elif pressure.ndim == 4:
@@ -336,8 +394,8 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                     row = []
                     for j in range(p_2d.shape[1]):
                         row.append({
-                            'real': round_to_2_decimals(p_2d[i, j].real),
-                            'imag': round_to_2_decimals(p_2d[i, j].imag)
+                            'real': round_to_6_decimals(p_2d[i, j].real),
+                            'imag': round_to_6_decimals(p_2d[i, j].imag)
                         })
                     pressure_data.append(row)
             else:
@@ -347,8 +405,8 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                     row = []
                     for j in range(p_flat.shape[1]):
                         row.append({
-                            'real': round_to_2_decimals(p_flat[i, j].real),
-                            'imag': round_to_2_decimals(p_flat[i, j].imag)
+                            'real': round_to_6_decimals(p_flat[i, j].real),
+                            'imag': round_to_6_decimals(p_flat[i, j].imag)
                         })
                     pressure_data.append(row)
         result['propagation_pressure'] = pressure_data
@@ -359,15 +417,30 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
     if options and options.get('is_ray_output', False) and rays is not None:
         ray_trace_data = []
         if rays:
-            for ray in rays:
-                ray_info = {
-                    'alpha': round_to_2_decimals(getattr(ray, 'alpha', 0)),
-                    'num_top_bnc': int(getattr(ray, 'num_top_bnc', 0)),
-                    'num_bot_bnc': int(getattr(ray, 'num_bot_bnc', 0)),
-                    'ray_range': process_array_to_2_decimals(getattr(ray, 'ray_range', []).tolist() if hasattr(getattr(ray, 'ray_range', []), 'tolist') else []),
-                    'ray_depth': process_array_to_2_decimals(getattr(ray, 'ray_depth', []).tolist() if hasattr(getattr(ray, 'ray_depth', []), 'tolist') else [])
-                }
-                ray_trace_data.append(ray_info)
+            # rays 是一个嵌套列表：[source_collection]，其中每个 source_collection 包含多条射线
+            for source_rays in rays:  # 遍历每个源位置的射线集合
+                for ray in source_rays:  # 遍历该源位置的每条射线
+                    # 从射线对象中提取数据，注意属性名称
+                    launch_angle = getattr(ray, 'src_ang', getattr(ray, 'alpha', 0))  # 发射角度
+                    ray_xy = getattr(ray, 'xy', np.array([[], []]))  # 射线轨迹坐标
+                    
+                    # 转换坐标单位：距离从km转为m，深度保持m
+                    if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
+                        ray_range_km = ray_xy[0, :]  # 距离（km）
+                        ray_depth_m = ray_xy[1, :]   # 深度（m）
+                        
+                        # 距离转换为米，并保留2位小数
+                        ray_range_m = [round_to_2_decimals(r) for r in ray_range_km]
+                        ray_depth_m_rounded = [round_to_2_decimals(d) for d in ray_depth_m]
+                        
+                        ray_info = {
+                            'alpha': round_to_2_decimals(launch_angle),
+                            'num_top_bnc': int(getattr(ray, 'num_top_bnc', 0)),
+                            'num_bot_bnc': int(getattr(ray, 'num_bot_bnc', 0)),
+                            'ray_range': ray_range_m,
+                            'ray_depth': ray_depth_m_rounded
+                        }
+                        ray_trace_data.append(ray_info)
         result['ray_trace'] = ray_trace_data
     else:
         result['ray_trace'] = []
@@ -375,7 +448,7 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
     # 时域波形（暂不实现）
     result['time_wave'] = {}
     
-    return json.dumps(result)
+    return json.dumps(result, cls=NoScientificJSONEncoder)
 
 def solve_bellhop_propagation(input_json):
     """
