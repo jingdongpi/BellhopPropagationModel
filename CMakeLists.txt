@@ -8,8 +8,10 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 # 构建选项
 option(BUILD_EXECUTABLE "Build executable version" ON)
 option(BUILD_SHARED_LIBS "Build shared library version" ON)
-option(USE_CYTHON "Use Cython optimized version" ON)
+option(USE_CYTHON "Use Cython optimized version" OFF)
+option(USE_NUITKA "Use Nuitka compiled modules" ON)
 option(BUILD_PYTHON_WRAPPER "Build Python wrapper" ON)
+option(PRODUCTION_MODE "Build production version with source code protection" OFF)
 
 # 设置默认构建类型
 if(NOT CMAKE_BUILD_TYPE)
@@ -52,7 +54,17 @@ add_compile_definitions(PY_SSIZE_T_CLEAN)
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -finput-charset=UTF-8 -fexec-charset=UTF-8")
 
 # 选择源文件版本
-if(USE_CYTHON)
+if(PRODUCTION_MODE)
+    message(STATUS "Building PRODUCTION version with source code protection")
+    set(LIB_SOURCES src/BellhopPropagationModel_production.cpp)
+    set(EXE_SOURCES src/BellhopPropagationModel_exe_production.cpp)
+    add_compile_definitions(PRODUCTION_MODE=1)
+elseif(USE_NUITKA)
+    message(STATUS "Building with Nuitka compiled modules")
+    set(LIB_SOURCES src/BellhopPropagationModel_nuitka.cpp)
+    set(EXE_SOURCES src/BellhopPropagationModel_exe_nuitka.cpp)
+    add_compile_definitions(USE_NUITKA=1)
+elseif(USE_CYTHON)
     message(STATUS "Building with Cython optimization")
     set(LIB_SOURCES src/BellhopPropagationModel_cython.cpp)
     set(EXE_SOURCES src/BellhopPropagationModel_exe_cython.cpp)
@@ -108,7 +120,7 @@ if(BUILD_EXECUTABLE)
     
     # 设置输出目录和名称
     set_target_properties(BellhopPropagationModel_exe PROPERTIES
-        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/examples
+        RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
         OUTPUT_NAME BellhopPropagationModel
     )
     
@@ -118,8 +130,38 @@ if(BUILD_EXECUTABLE)
     )
 endif()
 
+# 添加Nuitka编译目标（可选）
+if(USE_NUITKA AND NOT PRODUCTION_MODE)
+    # 提示用户手动编译 Nuitka 模块
+    message(STATUS "")
+    message(STATUS "=== Nuitka 模块编译提示 ===")
+    message(STATUS "请确保已运行 Nuitka 编译脚本:")
+    message(STATUS "  python scripts/setup_nuitka_simple.py")
+    message(STATUS "或者运行完整版本:")
+    message(STATUS "  python scripts/setup_nuitka.py")
+    message(STATUS "编译的 .so 文件应位于 lib/ 目录")
+    message(STATUS "========================")
+    message(STATUS "")
+    
+    # 可选：自动编译（如果需要的话）
+    # add_custom_target(nuitka_modules
+    #     COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/setup_nuitka_simple.py
+    #     WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+    #     COMMENT "Building Nuitka modules"
+    #     VERBATIM
+    # )
+    
+    # 可选：添加依赖关系（如果启用自动编译）
+    # if(BUILD_SHARED_LIBS)
+    #     add_dependencies(BellhopPropagationModel nuitka_modules)
+    # endif()
+    # if(BUILD_EXECUTABLE)
+    #     add_dependencies(BellhopPropagationModel_exe nuitka_modules)
+    # endif()
+endif()
+
 # 添加Cython编译目标
-if(USE_CYTHON)
+if(USE_CYTHON AND NOT PRODUCTION_MODE)
     add_custom_target(cython_modules
         COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/setup_cython.py build_ext
         WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
@@ -133,6 +175,24 @@ if(USE_CYTHON)
     endif()
     if(BUILD_EXECUTABLE)
         add_dependencies(BellhopPropagationModel_exe cython_modules)
+    endif()
+endif()
+
+# 添加生产级Cython编译目标
+if(PRODUCTION_MODE)
+    add_custom_target(production_modules
+        COMMAND ${Python3_EXECUTABLE} ${CMAKE_SOURCE_DIR}/scripts/setup_fixed_cython.py build_ext
+        WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+        COMMENT "Building production Cython modules with fixed dependencies"
+        VERBATIM
+    )
+    
+    # 确保在构建C++目标之前编译生产模块
+    if(BUILD_SHARED_LIBS)
+        add_dependencies(BellhopPropagationModel production_modules)
+    endif()
+    if(BUILD_EXECUTABLE)
+        add_dependencies(BellhopPropagationModel_exe production_modules)
     endif()
 endif()
 

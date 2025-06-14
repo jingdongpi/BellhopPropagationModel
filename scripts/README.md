@@ -1,105 +1,131 @@
-# Bellhop传播模型项目管理指南
+# Bellhop传播模型项目脚本目录
 
 ## 概述
-本项目提供了 Bellhop 传播模型的 Cython+Python 优化实现，包含完整的构建、交付和管理脚本。
+本目录包含了 Bellhop 传播模型项目的核心管理脚本，采用简化设计，专注于核心功能。
+使用项目根目录下的 `manager.sh` 进行统一管理。
 
-## 脚本目录结构
+## 快速使用
+
+```bash
+# 返回项目根目录
+cd /home/shunli/AcousticProjects/BellhopPropagationModel
+
+# 完整编译流程
+./manager.sh build
+
+# 检查依赖
+./manager.sh deps  
+
+# 清理项目
+./manager.sh clean
+
+# 测试运行
+./manager.sh test
+
+# 显示帮助
+./manager.sh help
+```
+
+## 脚本说明
+
+### 核心脚本（按编号顺序）
 ```
 scripts/
-├── build.sh                    # 智能编译脚本
-├── create_delivery_package.sh  # 交付包创建脚本
-├── cleanup.sh                  # 项目清理脚本
-└── README.md                   # 本文件
+├── 01_compile_nuitka.py    # Nuitka Python模块编译
+├── 02_check_deps.py        # 项目依赖检查
+├── 03_build_legacy.sh      # 传统构建脚本（备用）
+└── 04_cleanup.sh           # 编译产物清理
 ```
 
-## 使用方法
+### 脚本功能
 
-### 1. 编译项目
+#### `01_compile_nuitka.py`
+- **功能**: 使用 Nuitka 编译 Python 模块为优化的 .so 库
+- **输入**: `python_core/` 和 `python_wrapper/` 下的 Python 文件
+- **输出**: `lib/` 目录下的编译后的 .so 文件
+- **使用**: `python scripts/01_compile_nuitka.py`
+
+#### `02_check_deps.py`
+- **功能**: 检查项目所需的 Python 依赖和系统工具
+- **检查项**: NumPy, SciPy, Nuitka, CMake, GCC等
+- **使用**: `python scripts/02_check_deps.py`
+
+#### `03_build_legacy.sh`
+- **功能**: 传统的完整构建脚本（备用）
+- **说明**: 包含完整的构建流程，作为备份方案
+- **使用**: `./scripts/03_build_legacy.sh`
+
+#### `04_cleanup.sh`
+- **功能**: 清理所有编译产物和临时文件
+- **清理项**: build/, lib/*.so, bin/可执行文件等
+- **使用**: `./scripts/04_cleanup.sh`
+
+## 统一管理
+
+**推荐使用项目根目录的 `scripts_manager.sh` 进行统一管理：**
+
 ```bash
-./scripts/build.sh
+# 完整编译项目
+./scripts_manager.sh build
+
+# 仅编译 Python 模块
+./scripts_manager.sh nuitka
+
+# 仅编译 C++ 程序
+./scripts_manager.sh cpp
+
+# 检查依赖
+./scripts_manager.sh deps
+
+# 运行测试
+./scripts_manager.sh test
+
+# 清理项目
+./scripts_manager.sh clean
+
+# 查看帮助
+./scripts_manager.sh help
 ```
-- 自动检测 Cython 环境
-- 智能选择编译选项
-- 运行快速测试验证
-- 输出编译结果和接口兼容性信息
 
-### 2. 创建交付包
-```bash
-./scripts/create_delivery_package.sh
-```
-- 检查编译产物，如需要会自动编译
-- 收集所有必要文件到 `BellhopPropagationModel_Delivery/`
-- 创建完整的使用文档和测试脚本
-- 正确配置 Python 模块路径
+## 编译流程
 
-### 3. 清理项目
-```bash
-./scripts/cleanup.sh
-```
-- 清理所有编译产物
-- 删除临时文件和缓存
-- 清理交付包目录
+### 标准编译流程
+1. **依赖检查**: `02_check_deps.py`
+2. **Python编译**: `01_compile_nuitka.py` 
+3. **C++编译**: CMake + Make
+4. **测试验证**: 运行生成的可执行文件
 
-## 编译要求
-- Linux x86_64 系统
-- GCC/G++ 编译器
-- CMake 3.10+
-- Python 3.9+
-- numpy 库
-- Cython（可选，用于性能优化）
+### 输出文件
+- **可执行文件**: `bin/BellhopPropagationModel`
+- **动态库**: `lib/libBellhopPropagationModel.so`
+- **Python库**: `lib/*.cpython-39-x86_64-linux-gnu.so`
 
-## 交付包内容
-交付包 `BellhopPropagationModel_Delivery/` 包含：
-- `bin/BellhopPropagationModel` - 主可执行文件
-- `lib/libBellhopPropagationModel.so` - 动态库
-- `lib/*.so` - Cython 扩展模块
-- `lib/python_modules/` - Python 核心模块
-- `include/BellhopPropagationModelInterface.h` - C++ 接口头文件
-- `examples/` - 输入输出示例
-- `docs/` - 详细文档
-- `test.sh` - 快速测试脚本
-- `README.md` - 使用说明
+## 维护说明
 
-## 接口规范兼容性
-本项目完全符合接口规范：
-- ✅ 可执行文件名：`BellhopPropagationModel`
-- ✅ 动态库名：`libBellhopPropagationModel.so`
-- ✅ C++ 接口函数：`int SolveBellhopPropagationModel(const std::string& json, std::string& outJson)`
-- ✅ 头文件：`BellhopPropagationModelInterface.h`
-- ✅ 支持两种调用方式：
-  - 无参数：使用默认的 `input.json` -> `output.json`
-  - 双参数：`./BellhopPropagationModel input.json output.json`
+### 简化原则
+- 移除了复杂的编号脚本（00-06, 99等）
+- 移除了 Windows 相关脚本（.bat文件）
+- 专注于 Linux 平台的核心功能
+- 使用统一的命名规范
 
-## 技术方案
-- **核心算法**：基于原有 Python 实现
-- **性能优化**：使用 Cython 编译关键模块
-- **接口封装**：C++ 包装器调用 Python 核心
-- **依赖管理**：需要系统安装 Python 3.9+ 和 numpy
-- **外部依赖**：需要 bellhop 二进制文件在系统 PATH 中
+### 版本控制
+- 所有脚本都进行版本控制
+- 修改脚本后请更新相应的文档
+- 保持脚本的简洁性和可维护性
 
 ## 故障排除
 
-### 编译问题
-1. 检查 CMake 版本：`cmake --version`
-2. 检查 Python 环境：`python3 --version`
-3. 检查 numpy 安装：`python3 -c "import numpy; print(numpy.__version__)"`
+### 常见问题
+1. **依赖缺失**: 运行 `./scripts_manager.sh deps` 检查
+2. **编译失败**: 查看具体错误信息，通常是依赖或路径问题
+3. **权限问题**: 确保脚本有执行权限 `chmod +x scripts/*.sh`
 
-### 运行问题
-1. 检查 bellhop 安装：`which bellhop`
-2. 检查环境变量配置
-3. 查看详细错误信息
+### 支持
+- 项目根目录: `/home/shunli/AcousticProjects/BellhopPropagationModel`
+- 脚本目录: `scripts/`
+- 日志文件: 查看终端输出
 
-### 模块导入问题
-确保在交付包中正确设置了环境变量：
-```bash
-export PYTHONPATH=$PWD/lib:$PWD/lib/python_modules:$PYTHONPATH
-export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
-```
+---
 
-## 版本历史
-- v1.0：初始版本，基础 Python 实现
-- v2.0：添加 Cython 优化
-- v3.0：完善交付包和脚本管理
-
-## 联系信息
-如有问题或建议，请联系项目维护团队。
+**最后更新**: 2025-06-14  
+**版本**: v3.0 - 简化版本

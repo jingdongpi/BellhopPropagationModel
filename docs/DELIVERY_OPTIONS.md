@@ -1,103 +1,64 @@
-# Bellhop传播模型 - 交付方案说明
+# Bellhop声传播模型 - 交付说明
 
-## 🎯 交付方案选择
+## 交付内容
 
-根据您的需求和部署环境，我们提供两种交付方案：
+### 核心文件
+- `lib/libBellhopPropagationModel.so` - 动态库文件
+- `examples/BellhopPropagationModel` - 可执行程序
+- `include/BellhopPropagationModelInterface.h` - C++头文件
 
-## 方案一：依赖 Python 环境（推荐）
+### 示例文件  
+- `examples/input.json` - 输入格式示例
+- `examples/output.json` - 输出格式示例
 
-### 📦 交付内容
+### 说明文档
+- `README.md` - 基本使用说明
+- `USER_GUIDE.md` - 详细用户指南
+
+## 部署要求
+
+### 系统要求
+- Linux (64位)
+- Python 3.8+
+- numpy库
+
+### 安装步骤
+1. 将整个目录复制到目标系统
+2. 确保Python环境可用: `python3 --version`
+3. 安装numpy: `pip install numpy`  
+4. 设置权限: `chmod +x lib/libBellhopPropagationModel.so examples/BellhopPropagationModel`
+5. 测试运行: `cd examples && ./BellhopPropagationModel`
+
+## 使用方法
+
+### 命令行方式
+```bash
+cd examples
+./BellhopPropagationModel input.json output.json
 ```
-BellhopPropagationModel_Release/
-├── bin/
-│   └── BellhopPropagationModel              # 可执行文件 (39KB)
-├── lib/
-│   ├── libBellhopPropagationModel.so        # 动态库 (27KB)
-│   ├── bellhop_cython_core.cpython-39-x86_64-linux-gnu.so    # Cython模块 (~50KB)
-│   └── bellhop_core_modules.cpython-39-x86_64-linux-gnu.so   # Cython模块 (~50KB)
-├── include/
-│   └── BellhopPropagationModelInterface.h   # C++头文件
-├── examples/
-│   ├── input*.json                          # 输入示例
-│   └── output_example.json                  # 输出示例
-└── README_DELIVERY.md                       # 使用说明
+
+### 库调用方式
+```cpp
+#include "BellhopPropagationModelInterface.h"
+std::string input_json = "...";
+std::string output_json;
+int result = SolveBellhopPropagationModel(input_json, output_json);
 ```
 
-### 🔧 用户部署要求
-- **Python 3.9**: 用户需要安装 Python 3.9
-- **NumPy**: `pip install numpy`
-- **总大小**: ~200KB（不含Python环境）
+## 文件大小
+- 动态库: ~25KB
+- 可执行文件: ~40KB  
+- 示例文件: ~5KB
+- 总计: <100KB
 
-### ✅ 优点
-- 文件小，部署简单
-- 性能优秀（Cython优化）
-- 完全符合接口规范
-
-### ❌ 缺点
-- 用户需要安装Python 3.9环境
+## 支持的功能
+- 声传播计算
+- 传输损失分析
+- 射线追踪
+- 压力场建模
 
 ---
-
-## 方案二：Docker 容器部署（无Python依赖）
-
-### 📦 交付内容
-```
-BellhopPropagationModel_Docker/
-├── Dockerfile                               # Docker构建文件
-├── docker-compose.yml                      # 快速部署
-├── bin/BellhopPropagationModel             # 可执行文件
-├── lib/libBellhopPropagationModel.so       # 动态库  
-├── include/BellhopPropagationModelInterface.h
-└── README_DOCKER.md                        # Docker使用说明
-```
-
-### 🔧 用户部署要求
-- **Docker**: 用户需要安装Docker
-- **总大小**: ~100MB（包含完整运行环境）
-
-### ✅ 优点
-- 用户无需安装Python
-- 环境完全隔离
-- 跨平台兼容
-
-### ❌ 缺点
-- 需要Docker环境
-- 镜像相对较大
-
----
-
-## 方案三：静态编译版本（实验性）
-
-### 🔧 特点
-- **文件大小**: 15-25MB（静态链接Python）
-- **依赖**: 完全无依赖
-- **复杂度**: 需要复杂的构建配置
-
-### ⚠️ 风险
-- 构建复杂，可能不稳定
-- 文件较大
-- 兼容性问题
-
----
-
-## 📋 推荐方案
-
-**对于大多数用户**: 推荐 **方案一**
-- 部署简单，文件小
-- Python 3.9是常见环境
-- 性能和稳定性最佳
-
-**对于严格无Python要求**: 推荐 **方案二**
-- Docker提供完整隔离
-- 一键部署，无环境依赖
-
-## 🚀 当前实现状态
-
-我们已经完成了 **方案一** 的实现：
-- ✅ 可执行文件符合接口规范
-- ✅ 动态库符合接口规范  
-- ✅ Cython性能优化
-- ✅ 完整测试验证
+*交付说明 v1.0*
 
 您希望我：
 1. 完善方案一的交付包？

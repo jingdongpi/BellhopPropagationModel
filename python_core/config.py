@@ -4,29 +4,50 @@ Bellhop配置文件
 import os
 from pathlib import Path
 
-# Bellhop二进制文件路径
-AtBinPath = "/home/shunli/pro/at/bin"
+"""
+Bellhop配置文件
+"""
+import os
+from pathlib import Path
 
-# 验证Bellhop二进制文件是否存在
-bellhop_executable = os.path.join(AtBinPath, "bellhop")
-if os.path.exists(bellhop_executable):
-    print(f"Found Bellhop binary: {bellhop_executable}")
-else:
-    print(f"Bellhop binary not found: {bellhop_executable}")
-    # 备用路径列表
+# 项目根目录和内置二进制文件路径
+PROJECT_ROOT = Path(__file__).parent.parent
+BUILTIN_BIN_DIR = PROJECT_ROOT / "bin"
+
+# 优先使用项目内置的二进制文件
+def get_binary_path():
+    """获取二进制文件路径，优先使用项目内置版本"""
+    
+    # 1. 首先检查项目内置二进制目录
+    builtin_bellhop = BUILTIN_BIN_DIR / "bellhop"
+    if builtin_bellhop.exists():
+        return str(BUILTIN_BIN_DIR)
+    
+    # 2. 如果项目内没有，检查系统PATH
+    import shutil
+    if shutil.which("bellhop"):
+        return str(Path(shutil.which("bellhop")).parent)
+    
+    # 3. 检查常见安装路径
     possible_paths = [
         "/usr/local/bin",
         "/opt/at/bin", 
-        "/home/shunli/pro/AcousticFastAPI/at/bin",
-        "/usr/bin"
+        "/usr/bin",
+        "/home/shunli/pro/at/bin",  # 保留用户原有路径作为备选
     ]
     
     for path in possible_paths:
-        bellhop_path = os.path.join(path, "bellhop")
-        if os.path.exists(bellhop_path):
-            AtBinPath = path
-            print(f"Found Bellhop in alternative path: {bellhop_path}")
-            break
+        bellhop_path = Path(path) / "bellhop"
+        if bellhop_path.exists():
+            return str(path)
+    
+    # 4. 如果都没找到，返回项目内置目录（即使为空）
+    print(f"Warning: bellhop binary not found. Using project bin directory: {BUILTIN_BIN_DIR}")
+    print("Please run: ./scripts/manage.sh binaries  # to collect binaries")
+    return str(BUILTIN_BIN_DIR)
+
+# 设置二进制文件路径
+AtBinPath = get_binary_path()
 
 # 工作目录配置 - 使用统一的项目管理
 try:

@@ -13,6 +13,42 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 python_core_path = os.path.join(os.path.dirname(current_dir), 'python_core')
 sys.path.insert(0, python_core_path)
 
+# **设置项目二进制文件路径**
+import os
+def setup_project_binary_path():
+    """设置项目bin目录到PATH"""
+    try:
+        # 获取项目根目录
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(current_dir)
+        bin_dir = os.path.join(project_root, 'bin')
+        
+        # 检查bin目录是否存在
+        if os.path.exists(bin_dir):
+            # 添加到PATH
+            current_path = os.environ.get('PATH', '')
+            if bin_dir not in current_path:
+                os.environ['PATH'] = bin_dir + os.pathsep + current_path
+                print(f"已添加项目bin目录到PATH: {bin_dir}")
+            
+            # 检查bellhop是否可用
+            bellhop_path = os.path.join(bin_dir, 'bellhop.exe') if os.name == 'nt' else os.path.join(bin_dir, 'bellhop')
+            if os.path.exists(bellhop_path):
+                print("bellhop可执行文件可用")
+                return True
+            else:
+                print("警告: bellhop可执行文件不存在")
+                return False
+        else:
+            print(f"警告: bin目录不存在: {bin_dir}")
+            return False
+    except Exception as e:
+        print(f"配置项目二进制路径时出错: {e}")
+        return False
+
+# 初始化二进制路径
+setup_project_binary_path()
+
 # **在导入其他模块前先确保目录存在**
 def ensure_data_dirs():
     """确保所有必要的数据目录存在"""
@@ -509,21 +545,35 @@ def solve_bellhop_propagation(input_json):
         for dir_path in dirs:
             os.makedirs(dir_path, exist_ok=True)
         
-        # 动态导入，避免初始化时的依赖问题
+        # 动态导入，优先使用 Nuitka 编译好的模块
         try:
-            # 尝试直接导入
-            import python_core.bellhop as bellhop_module
-            bellhop = bellhop_module
+            # 直接导入 Nuitka 编译的 bellhop 模块
+            import bellhop as bellhop_module
+            print("✓ 使用 Nuitka 编译的 bellhop 模块")
         except ImportError:
-            # 如果导入失败，确保路径正确后再导入
-            if python_core_path not in sys.path:
-                sys.path.insert(0, python_core_path)
-            import python_core.bellhop as bellhop_module
-            bellhop = bellhop_module
+            try:
+                # 尝试从 lib 目录导入编译模块
+                lib_path = os.path.join(project_root, 'lib')
+                if lib_path not in sys.path:
+                    sys.path.insert(0, lib_path)
+                import bellhop as bellhop_module
+                print("✓ 使用 lib 目录中的 bellhop 模块")
+            except ImportError:
+                try:
+                    # 回退到原始 python_core 模块
+                    python_core_path = os.path.join(project_root, 'python_core')
+                    if python_core_path not in sys.path:
+                        sys.path.insert(0, python_core_path)
+                    import bellhop as bellhop_module
+                    print("✓ 使用原始 python_core.bellhop 模块")
+                except ImportError as e:
+                    print(f"✗ 无法导入 bellhop 模块: {e}")
+                    raise ImportError(f"无法找到 bellhop 模块: {e}")
         
-        call_Bellhop = bellhop.call_Bellhop
-        call_Bellhop_Rays = bellhop.call_Bellhop_Rays
-        call_Bellhop_multi_freq = bellhop.call_Bellhop_multi_freq
+        # 获取关键函数
+        call_Bellhop = bellhop_module.call_Bellhop
+        call_Bellhop_Rays = bellhop_module.call_Bellhop_Rays
+        call_Bellhop_multi_freq = bellhop_module.call_Bellhop_multi_freq
         
         # 解析输入参数（更新后的函数）
         freq, sd, rd, bathm, ssp, sed, base, options = parse_input_data(input_json)
@@ -554,7 +604,18 @@ def solve_bellhop_propagation(input_json):
                                              beam_number=beam_number, grazing_high=grazing_high, grazing_low=grazing_low)
                 
                 # 导入射线筛选函数
-                from python_core.bellhop import find_cvgcRays
+                try:
+                    from bellhop import find_cvgcRays
+                    print("✓ 使用编译的 find_cvgcRays 函数")
+                except ImportError:
+                    # 回退到原始模块
+                    try:
+                        from python_core.bellhop import find_cvgcRays
+                        print("✓ 使用原始 find_cvgcRays 函数")
+                    except ImportError:
+                        # 使用已导入的模块
+                        find_cvgcRays = bellhop_module.find_cvgcRays
+                        print("✓ 使用模块中的 find_cvgcRays 函数")
                 
                 # 筛选收敛射线，传递海底深度信息
                 rays = find_cvgcRays(rays_total, bathm)
