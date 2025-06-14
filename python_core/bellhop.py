@@ -3,11 +3,19 @@ try:
     from .readwrite import write_env, read_shd, get_rays
     from .env import Pos, Source, Dom, cInt, SSPraw, SSP, HS, BotBndry, TopBndry, Bndry, Box, Beam
     from .config import AtBinPath
+    from .logger import log_info, log_debug, log_warning
 except ImportError:
     # 尝试绝对导入 (用于直接脚本模式)
     from readwrite import write_env, read_shd, get_rays
     from env import Pos, Source, Dom, cInt, SSPraw, SSP, HS, BotBndry, TopBndry, Bndry, Box, Beam
     from config import AtBinPath
+    try:
+        from logger import log_info, log_debug, log_warning
+    except ImportError:
+        # 如果logger不可用，定义简单的占位函数
+        def log_info(msg): pass
+        def log_debug(msg): pass  
+        def log_warning(msg): pass
 
 from os import system
 import numpy as np
@@ -50,7 +58,7 @@ def call_Bellhop_multi_freq(frequencies, source_depth, receiver_depths, receiver
     frequencies = np.array(frequencies)
     Nfreq = len(frequencies)
     
-    print(f"Starting multi-frequency calculation for {Nfreq} frequencies: {frequencies}")
+    log_debug(f"Starting multi-frequency calculation for {Nfreq} frequencies: {frequencies}")
     
     # Source and receiving position setup (similar to WGNPd implementation)
     filename = 'data/tmp/multi_freq'
@@ -210,7 +218,7 @@ def call_Bellhop_multi_freq(frequencies, source_depth, receiver_depths, receiver
             if return_pressure:
                 Pressure[0, iF, :, :] = pressure_sum[0, 0, :, :]
     
-    print(f"Multi-frequency calculation completed for {Nfreq} frequencies")
+    log_debug(f"Multi-frequency calculation completed for {Nfreq} frequencies")
     
     if return_pressure:
         Pressure = np.squeeze(Pressure)

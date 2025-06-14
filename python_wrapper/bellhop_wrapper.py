@@ -464,13 +464,7 @@ def format_output_data(pos, TL, freq, pressure=None, rays=None, options=None, er
                 launch_angle = getattr(ray, 'src_ang', getattr(ray, 'alpha', 0))  # 发射角度
                 ray_xy = getattr(ray, 'xy', np.array([[], []]))  # 射线轨迹坐标
                 
-                # 调试：检查射线数据的原始值
-                if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
-                    print(f"Debug: ray_xy shape: {ray_xy.shape}")
-                    print(f"Debug: ray_xy[0] (range) sample: {ray_xy[0, :5] if ray_xy.shape[1] > 5 else ray_xy[0, :]}")
-                    print(f"Debug: ray_xy[1] (depth) sample: {ray_xy[1, :5] if ray_xy.shape[1] > 5 else ray_xy[1, :]}")
-                    print(f"Debug: max depth in ray: {np.max(ray_xy[1, :])}")
-                    print(f"Debug: min depth in ray: {np.min(ray_xy[1, :])}")
+                # 静默处理射线数据（移除调试输出）
                 
                 # 转换坐标单位和精度：距离和深度都保持m（整数）
                 if ray_xy.size > 0 and ray_xy.shape[0] >= 2:
@@ -565,7 +559,7 @@ def solve_bellhop_propagation(input_json):
                 # 筛选收敛射线，传递海底深度信息
                 rays = find_cvgcRays(rays_total, bathm)
                 
-                print(f"Ray tracing completed, receiver depth points: {len(rd)}, max range: {bathm.r[-1]*1000:.0f}m")
+                # Ray tracing completed (静默模式)
             except Exception as e:
                 print(f"Ray tracing calculation failed: {str(e)}")
                 rays = []  # 如果失败，返回空列表

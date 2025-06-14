@@ -14,7 +14,6 @@ except ImportError:
     from env import Source, Dom, Pos, cInt, Ice, SSPraw, SSP, HS, BotBndry, TopBndry, Bndry, Box, Beam, Modes, Eigenray
 
 import re
-from matplotlib import pyplot as plt
 from math import floor
 
 """ 
@@ -1410,78 +1409,6 @@ def read_arrivals_asc_alt(fname, narrmx=200):
                         line_index += 1
                     arrival_list.append(loc_arrivals)
     return arrival_list, pos
-
-
-def plotray(fname):
-    """
-    Translation of plotray to Python
-    Hunter Akins 2021
-    """
-    # Plot the RAYfil produced by Bellhop or Bellhop3D
-    # % usage: plotray( rayfil )
-    # % where rayfil is the ray file (extension is optional)
-    # % e.g. plotray( 'foofoo' )
-    # %
-    # % for BELLHOP3D files, rays in (x,y,z) are converted to (r,z) coordinates
-    # %
-    # % MBP July 1999
-
-    # global units jkpsflag
-
-    with open(fname, 'r') as f:
-        lines = f.readlines()
-        TITLE = lines[0]
-        freq = float(lines[1])
-        tmp = lines[2].split(' ')
-        tmp = [x for x in tmp if x != '']
-        Nsx = int(tmp[0])
-        Nsy = int(tmp[1])
-        Nsz = int(tmp[2])
-        tmp = lines[3].split(' ')
-        tmp = [x for x in tmp if x != '']
-        Nalpha = int(tmp[0])
-        Nbeta = int(tmp[1])
-        deptht = float(lines[4])
-        depthb = float(lines[5])
-
-        fig, axis = plt.subplots(1, 1)
-        axis.set_ylim([0, depthb + 50])
-        axis.invert_yaxis()
-
-        line_ind = 7
-        for i in range(Nsz):
-            for ibeam in range(Nalpha):
-                if line_ind >= len(lines) - 1:
-                    break
-                else:
-                    angle = float(lines[line_ind])
-                    line_ind += 1
-                    tmp = lines[line_ind].split(' ')
-                    tmp = [x for x in tmp if x != '']
-                    nsteps = int(tmp[0])
-                    num_top_bnc = int(tmp[1])
-                    num_bot_bnc = int(tmp[2])
-                    line_ind += 1
-                    x, y = np.zeros(nsteps), np.zeros(nsteps)
-                    counter = 0
-                    for line_ind in range(line_ind, line_ind + nsteps):
-                        tmp = lines[line_ind].split(' ')
-                        tmp = [x for x in tmp if x != '']
-                        x[counter], y[counter] = float(tmp[0]), float(tmp[1])
-                        counter += 1
-
-                    if num_top_bnc == 0 and num_bot_bnc == 0:
-                        axis.plot(x, y, color='k')
-                    elif num_top_bnc == 1 and num_bot_bnc == 0:
-                        axis.plot(x, y, color='r', alpha=.85)
-                    elif num_top_bnc == 0 and num_bot_bnc == 1:
-                        axis.plot(x, y, color='b', alpha=.85)
-                    else:
-                        axis.plot(x, y, color='g', alpha=.7)
-                    line_ind += 1
-
-        return fig, axis
-
 
 def get_rays(fname):
     with open(fname, 'r') as f:

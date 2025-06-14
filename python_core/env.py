@@ -1,7 +1,5 @@
 import numpy as np
-from matplotlib import cm
 from scipy.interpolate import interp1d
-import matplotlib.pyplot as plt
 
 
 '''
@@ -149,23 +147,6 @@ class cInt:
         self.Low = low
         self.High = high
 
-class Field:
-    def __init__(self, **kwargs):
-        self.pos = kwargs['pos']
-        self.greens = kwargs['pressure']
-        self.freq = kwargs['freq'] # a list of frequencies
-
-    def contour(self):
-        shape = np.shape(self.greens)
-        if len(shape) > 2:
-            raise ValueError("Field object is too high dimensional, try multi_contour")
-        pos = self.pos 
-        ax = plt.contourf(pos.r.range, -pos.r.depth, np.log10(abs(self.greens.real)))
-        return ax
-
-    def multi_contour(self):
-        print('not implemented, maybe one day...')
-
 class Modes:
     def __init__(self, **kwargs):
         self.M = kwargs['M']
@@ -261,16 +242,6 @@ class Modes:
         strength_modes = self.phi[r_inds, :]
         self.strength_modes = strength_modes
         return strength_modes
-        
-
-    def plot(self):
-        figs = []
-        if self.M > 5:
-            for i in range(self.M):
-                fig = plt.figure(i)
-                plt.plot(self.phi[:,i], -self.z)
-                figs.append(fig)
-        return figs
 
     def __repr__(self):
         return 'Modes object with ' + str(self.M) + ' distinct modes'
@@ -284,100 +255,6 @@ class Arrival:
         self.num_top_bnc = info_list[4] 
         self.num_bot_bnc = info_list[5] 
         
-class Arrivals:
-    def __init__(self, arrival_list):
-        self.arrivals = arrival_list
-    
-    def plot_cir(self, vals=None,ax=None):
-        """
-        Plot the channel impulse response
-        Vals provides the option to pass in a set of arrivals to use fo calibrating the y axis
-        If vals=None, I use the arrivals in the object to calibrate the y-axis
-        I don't create a figure
-        I return ymin, ymax, vals so that the values from this arrival set can be used in a more global
-        scope to set the y-axis limits (useful for creating videos comprised of snapshots of a bunch
-        of CIR's). For example, I want to plot a bunch of Arrivals on the same plot, or combine a bunch of
-        CIRs into a video. Then I need to have the same axis limits for all the plots. 
-        I can use default vals (None) for the first plot, then use the ymin, ymax, vals return values
-        in a larger scope to standardize the axes. Then for the second, third, ... plots, I pass in vals
-        to make sure they all have the same time axis.
-        Output - 
-            ymin - float
-            ymax -float 
-                plus/minus 1.5 times max amplitude value
-            vals - list
-                vals[0] is the times
-                vals[1] is the amplitude vals
-        """
-        arrival_list = self.arrivals
-        amps = np.array([abs(x.amp) for x in arrival_list])
-        phase = np.array([np.angle(x.amp) for x in arrival_list])
-        times = np.array([x.delay for x in arrival_list])
-        """
-        Create the time axis
-        """
-        if type(vals) != type(None):
-            t = np.linspacea(.9*np.min(vals[0]), 1.1*np.max(vals[0]), 100)
-        else:
-            t = np.linspace(.9*np.min(times), 1.1*np.max(times), 100)
-        zeros = np.zeros(t.size)
-        if type(ax) == type(None):
-            fig, ax = plt.subplots(2,1) 
-        ax.scatter(t.real, zeros, s=6)
-        ax.stem(times.real, amps.real, markerfmt=' ', basefmt=' ',use_line_collection=True)
-        ax.scatter(times.real, amps,s=16,c='k')
-        scale = 1.5*np.max(abs(amps)) # set yaxis scale
-        ymin = - scale
-        ymax = scale
-        vals = [times.real, amps]
-        return ymin, ymax, vals
-
-    def plot_ellipse(self, vals=None, ref_amp =None, src_ang=False, ax=None):
-        """
-        Produce the travel time ellipse with colorbar for amplitude
-        Input - 
-        self - contains all the arrival info
-        vals - optional
-            allows me to use a reference arrival set to calibrate the plot axes
-            vals[0] = times
-            vals[0] = amps
-        """
-        arrival_list = self.arrivals
-        amps = np.array([abs(x.amp) for x in arrival_list])
-        times = np.array([x.delay.real for x in arrival_list])
-        rec_angles = np.array([x.rec_ang for x in arrival_list])
-        src_angles = np.array([x.rec_ang for x in arrival_list])
-        """
-        Create the time axis
-        """
-        if type(vals) != type(None):
-            tmin, tmax = np.min(vals[0]), np.max(vals[0])
-        else:
-            tmin, tmax = np.min(times), np.max(times)
-        if type(ref_amp) == type(None):
-            amps = amps / np.max(abs(amps))
-        else:
-            amps /= abs(ref_amp)
-        cvals = 10*np.log10(abs(amps))
-        #cvals = np.linspace(-5, 0, len(amps))
-        """ Make a nice cmap """ 
-        cmap = cm.get_cmap('Spectral')
-        """ Configure the x axis """
-
-        if type(ax) == type(None):
-            fig, ax = plt.subplots(2,1) 
-        ax.scatter([tmin, tmax], [0,0], s=0)
-        if src_ang == False:
-            angles = rec_angles
-        else:
-            angles = src_angles
-        max_db_down = 10
-        cvals_normed = abs(cvals) / max_db_down
-        strong_inds = cvals > -max_db_down
-        ax.scatter(times[strong_inds], angles[strong_inds], s=25, c=cmap(cvals_normed[strong_inds]))
-        vals = [times, amps]
-        ymin, ymax = -1.5*np.max(abs(angles)), 1.5*np.max(abs(angles))
-        return ymin, ymax, vals
 
 class KernInput:
     def __init__(self, Field_r, Field_s, env):
