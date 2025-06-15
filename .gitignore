@@ -203,6 +203,10 @@ cython_debug/
 *.app
 
 .vscode/
+BellhopPropagationModel_Delivery/
 build_cython/
 data/
 examples/
+
+*.tar.gz
+*.zip

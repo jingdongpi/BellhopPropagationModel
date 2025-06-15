@@ -1,279 +1,334 @@
 #!/bin/bash
-# ============================================================================
-# Bellhop传播模型项目脚本管理器 v3.0
-# ============================================================================
-# 功能：统一管理所有项目脚本，提供简化的构建、测试、清理接口
-# 更新：移除复杂的编号脚本，专注核心功能
-# ============================================================================
 
-set -e
+# BellhopPropagationModel 项目管理脚本
+# 统一管理构建、测试、部署等操作
+
+set -e  # 遇到错误时退出
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$PROJECT_ROOT"
 
 # 颜色定义
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-CYAN='\033[0;36m'
-NC='\033[0m'
+NC='\033[0m' # No Color
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SCRIPTS_DIR="$SCRIPT_DIR/scripts"
+# 日志函数
+log_info() {
+    echo -e "${BLUE}[INFO]${NC} $1"
+}
 
-print_header() {
-    echo -e "${CYAN}================================================${NC}"
-    echo -e "${CYAN}    Bellhop传播模型项目脚本管理器 v3.0${NC}"
-    echo -e "${CYAN}================================================${NC}"
+log_success() {
+    echo -e "${GREEN}[SUCCESS]${NC} $1"
+}
+
+log_warning() {
+    echo -e "${YELLOW}[WARNING]${NC} $1"
+}
+
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
 }
 
 # 显示帮助信息
 show_help() {
-    print_header
-    echo ""
-    echo -e "${GREEN}核心功能：${NC}"
-    echo -e "  ${BLUE}build${NC}     - 完整编译项目 (Nuitka + C++)"
-    echo -e "  ${BLUE}nuitka${NC}    - 仅编译 Python 模块"
-    echo -e "  ${BLUE}cpp${NC}       - 仅编译 C++ 程序"
-    echo -e "  ${BLUE}test${NC}      - 运行基础测试"
-    echo -e "  ${BLUE}clean${NC}     - 清理编译产物"
-    echo ""
-    echo -e "${GREEN}环境管理：${NC}"
-    echo -e "  ${BLUE}setup${NC}     - 检查和配置环境"
-    echo -e "  ${BLUE}deps${NC}      - 检查依赖"
-    echo ""
-    echo -e "${GREEN}使用示例：${NC}"
-    echo -e "  ${YELLOW}./scripts_manager.sh build${NC}    # 完整编译"
-    echo -e "  ${YELLOW}./scripts_manager.sh test${NC}     # 运行测试"
-    echo -e "  ${YELLOW}./scripts_manager.sh clean${NC}    # 清理项目"
-    echo ""
-    echo -e "${CYAN}脚本位置: $SCRIPTS_DIR/${NC}"
+    cat << EOF
+BellhopPropagationModel 项目管理脚本
+
+用法: $0 [选项]
+
+选项:
+    help          显示此帮助信息
+    build         构建项目（清理并重新编译）
+    quick-build   快速构建（增量编译）
+    clean         清理构建文件
+    install       安装项目到系统
+    test          运行测试
+    run           运行示例
+    nuitka        编译 Nuitka 模块
+    setup         初始化项目环境
+    status        显示项目状态
+    delivery      创建交付包
+    
+示例:
+    $0 build        # 完整构建项目
+    $0 run          # 运行示例
+    $0 test         # 运行测试
+    $0 delivery     # 创建交付包
+    $0 status       # 检查项目状态
+
+EOF
 }
 
-# 检查脚本目录是否存在
-if [ ! -d "$SCRIPTS_DIR" ]; then
-    echo -e "${RED}错误: 脚本目录不存在: $SCRIPTS_DIR${NC}"
-    exit 1
-fi
-
-# 核心编译功能
-build_project() {
-    echo -e "${GREEN}=== 开始完整项目编译 ===${NC}"
+# 检查项目状态
+check_status() {
+    log_info "检查项目状态..."
     
-    # 1. 检查依赖
-    echo -e "${BLUE}[1/3] 检查依赖...${NC}"
-    if [ -f "$SCRIPTS_DIR/02_check_deps.py" ]; then
-        python3 "$SCRIPTS_DIR/02_check_deps.py"
-    fi
+    echo "项目根目录: $PROJECT_ROOT"
+    echo
     
-    # 2. 编译 Python 模块
-    echo -e "${BLUE}[2/3] 编译 Python 模块 (Nuitka)...${NC}"
-    if [ -f "$SCRIPTS_DIR/01_compile_nuitka.py" ]; then
-        python3 "$SCRIPTS_DIR/01_compile_nuitka.py"
-    else
-        echo -e "${RED}错误: 01_compile_nuitka.py 不存在${NC}"
-        exit 1
-    fi
+    # 检查关键文件
+    echo "关键文件状态:"
+    local files=(
+        "CMakeLists.txt"
+        "bin/BellhopPropagationModel"
+        "lib/libBellhopPropagationModel.so"
+        "python_wrapper/bellhop_wrapper.py"
+        "input.json"
+    )
     
-    # 3. 编译 C++ 程序
-    echo -e "${BLUE}[3/3] 编译 C++ 程序...${NC}"
-    mkdir -p build
-    cd build
-    cmake .. -DUSE_NUITKA=ON -DBUILD_EXECUTABLE=ON -DBUILD_SHARED_LIBS=ON
-    make -j$(nproc)
-    cd ..
-    
-    echo -e "${GREEN}=== 编译完成! ===${NC}"
-    echo -e "${GREEN}可执行文件: bin/BellhopPropagationModel${NC}"
-    echo -e "${GREEN}动态库: lib/libBellhopPropagationModel.so${NC}"
-}
-
-# Nuitka 编译
-build_nuitka() {
-    echo -e "${GREEN}=== 编译 Python 模块 (Nuitka) ===${NC}"
-    if [ -f "$SCRIPTS_DIR/01_compile_nuitka.py" ]; then
-        python3 "$SCRIPTS_DIR/01_compile_nuitka.py"
-    else
-        echo -e "${RED}错误: 01_compile_nuitka.py 不存在${NC}"
-        exit 1
-    fi
-}
-
-# C++ 编译
-build_cpp() {
-    echo -e "${GREEN}=== 编译 C++ 程序 ===${NC}"
-    mkdir -p build
-    cd build
-    cmake .. -DUSE_NUITKA=ON -DBUILD_EXECUTABLE=ON -DBUILD_SHARED_LIBS=ON
-    make -j$(nproc)
-    cd ..
-    echo -e "${GREEN}C++ 编译完成!${NC}"
-}
-
-# 基础测试
-run_test() {
-    echo -e "${GREEN}=== 运行基础功能测试 ===${NC}"
-    
-    # 检查可执行文件
-    if [ ! -f "bin/BellhopPropagationModel" ]; then
-        echo -e "${RED}错误: 可执行文件不存在，请先编译项目${NC}"
-        echo -e "${YELLOW}运行: ./scripts_manager.sh build${NC}"
-        exit 1
-    fi
-    
-    # 测试运行
-    if [ -f "examples/input.json" ]; then
-        echo -e "${BLUE}测试可执行文件...${NC}"
-        cd examples
-        
-        # 添加错误处理和详细输出
-        echo "正在运行: ../bin/BellhopPropagationModel input.json test_output.json"
-        
-        # 使用 timeout 防止程序无限挂起，并捕获退出状态
-        timeout 30s ../bin/BellhopPropagationModel input.json test_output.json
-        exit_code=$?
-        
-        if [ $exit_code -eq 0 ]; then
-            if [ -f "test_output.json" ]; then
-                echo -e "${GREEN}✓ 基础功能测试通过!${NC}"
-                echo -e "${BLUE}输出文件: examples/test_output.json${NC}"
-                # 显示文件大小而不是内容（避免打印大文件）
-                file_size=$(du -h test_output.json 2>/dev/null | cut -f1)
-                echo -e "${BLUE}文件大小: ${file_size}${NC}"
-                # 检查文件是否为有效的JSON格式
-                if command -v jq >/dev/null 2>&1; then
-                    if jq empty test_output.json >/dev/null 2>&1; then
-                        echo -e "${GREEN}✓ 输出文件为有效的JSON格式${NC}"
-                        # 显示JSON的顶层键（不显示具体内容）
-                        echo -e "${BLUE}JSON结构:${NC}"
-                        jq -r 'keys[]' test_output.json 2>/dev/null | head -10 | sed 's/^/  - /'
-                    else
-                        echo -e "${YELLOW}⚠ 输出文件不是有效的JSON格式${NC}"
-                    fi
-                else
-                    echo -e "${BLUE}提示: 安装 jq 可以验证JSON格式 (apt install jq)${NC}"
-                fi
-            else
-                echo -e "${RED}✗ 程序运行成功但未生成输出文件!${NC}"
-                exit 1
-            fi
-        elif [ $exit_code -eq 124 ]; then
-            echo -e "${RED}✗ 程序运行超时（30秒）!${NC}"
-            exit 1
-        elif [ $exit_code -eq 139 ]; then
-            echo -e "${RED}✗ 程序发生段错误（Segmentation fault）!${NC}"
-            echo -e "${YELLOW}建议：重新编译项目或检查 Python 环境${NC}"
-            exit 1
+    for file in "${files[@]}"; do
+        if [ -f "$file" ]; then
+            echo "  ✅ $file"
         else
-            echo -e "${RED}✗ 程序运行失败，退出码: $exit_code${NC}"
-            exit 1
+            echo "  ❌ $file (缺失)"
         fi
-        cd ..
-    else
-        echo -e "${YELLOW}警告: examples/input.json 不存在，跳过功能测试${NC}"
-    fi
-}
-
-# 环境配置
-setup_environment() {
-    echo -e "${GREEN}=== 检查和配置开发环境 ===${NC}"
-    if [ -f "$SCRIPTS_DIR/00_environment_setup.sh" ]; then
-        echo -e "${BLUE}使用完整环境配置脚本...${NC}"
-        "$SCRIPTS_DIR/00_environment_setup.sh" --check
-    else
-        echo -e "${BLUE}基础依赖检查...${NC}"
-        python3 -c "import numpy, scipy, nuitka; print('✓ Python依赖正常')"
-        cmake --version > /dev/null && echo -e "${GREEN}✓ CMake 可用${NC}"
-        gcc --version > /dev/null && echo -e "${GREEN}✓ GCC 可用${NC}"
-    fi
-}
-
-# 依赖检查
-check_dependencies() {
-    echo -e "${GREEN}=== 检查项目依赖 ===${NC}"
-    if [ -f "$SCRIPTS_DIR/02_check_deps.py" ]; then
-        python3 "$SCRIPTS_DIR/02_check_deps.py"
-    else
-        echo -e "${BLUE}基础依赖检查...${NC}"
-        python3 -c "
-import sys
-try:
-    import numpy
-    print('✓ NumPy:', numpy.__version__)
-except ImportError:
-    print('✗ NumPy 未安装')
-    sys.exit(1)
-
-try:
-    import scipy  
-    print('✓ SciPy:', scipy.__version__)
-except ImportError:
-    print('✗ SciPy 未安装')
-    sys.exit(1)
-
-try:
-    import nuitka
-    print('✓ Nuitka 可用')
-except ImportError:
-    print('✗ Nuitka 未安装')
-    sys.exit(1)
-"
-    fi
-}
-
-# 清理项目
-clean_project() {
-    echo -e "${GREEN}=== 清理编译产物 ===${NC}"
+    done
     
-    # 使用现有清理脚本
-    if [ -f "$SCRIPTS_DIR/04_cleanup.sh" ]; then
-        "$SCRIPTS_DIR/04_cleanup.sh"
+    echo
+    
+    # 检查 Python 环境
+    echo "Python 环境:"
+    if command -v python3 &> /dev/null; then
+        echo "  Python 版本: $(python3 --version)"
+        echo "  Python 路径: $(which python3)"
     else
-        # 手动清理
-        echo -e "${BLUE}手动清理编译产物...${NC}"
-        rm -rf build/
-        rm -rf lib/*.so lib/*.dll 
-        rm -f bin/BellhopPropagationModel
-        rm -f examples/test_output.json
-        echo -e "${GREEN}✓ 清理完成${NC}"
+        echo "  ❌ Python3 未找到"
+    fi
+    
+    echo
+    
+    # 检查编译的模块
+    echo "Nuitka 编译模块:"
+    local nuitka_modules=($(find lib/ -name "*.cpython-*.so" 2>/dev/null))
+    if [ ${#nuitka_modules[@]} -gt 0 ]; then
+        for module in "${nuitka_modules[@]}"; do
+            echo "  ✅ $(basename "$module")"
+        done
+    else
+        echo "  ⚠️  未找到 Nuitka 编译模块"
     fi
 }
 
-# 解析命令
-case "${1:-help}" in
-    build)
-        cd "$SCRIPT_DIR"
-        build_project
-        ;;
-    nuitka)
-        cd "$SCRIPT_DIR"
+# 清理构建文件
+clean_build() {
+    log_info "清理构建文件..."
+    
+    rm -rf build/
+    rm -f bin/BellhopPropagationModel
+    rm -f lib/libBellhopPropagationModel.so
+    
+    log_success "清理完成"
+}
+
+# 编译 Nuitka 模块
+build_nuitka() {
+    log_info "编译 Nuitka 模块..."
+    
+    if [ -f "scripts/01_compile_nuitka.py" ]; then
+        python3 scripts/01_compile_nuitka.py
+    elif [ -f "scripts/setup_nuitka_simple.py" ]; then
+        python3 scripts/setup_nuitka_simple.py
+    else
+        log_warning "未找到 Nuitka 编译脚本"
+        return 1
+    fi
+    
+    log_success "Nuitka 模块编译完成"
+}
+
+# 构建项目
+build_project() {
+    local clean_build_flag=$1
+    
+    if [ "$clean_build_flag" = "clean" ]; then
+        log_info "执行完整构建（清理后重建）..."
+        clean_build
+    else
+        log_info "执行快速构建..."
+    fi
+    
+    # 创建构建目录
+    mkdir -p build
+    cd build
+    
+    # 配置 CMake
+    log_info "配置 CMake..."
+    cmake .. \
+        -DBUILD_EXECUTABLE=ON \
+        -DBUILD_SHARED_LIBS=ON \
+        -DUSE_NUITKA=ON \
+        -DCMAKE_BUILD_TYPE=Release
+    
+    # 编译
+    log_info "编译项目..."
+    make -j$(nproc)
+    
+    cd ..
+    
+    # 检查构建结果
+    if [ -f "bin/BellhopPropagationModel" ] && [ -f "lib/libBellhopPropagationModel.so" ]; then
+        log_success "项目构建成功"
+        echo "  可执行文件: bin/BellhopPropagationModel"
+        echo "  动态库: lib/libBellhopPropagationModel.so"
+    else
+        log_error "构建失败"
+        return 1
+    fi
+}
+
+# 安装项目
+install_project() {
+    log_info "安装项目..."
+    
+    if [ ! -d "build" ]; then
+        log_error "请先构建项目"
+        return 1
+    fi
+    
+    cd build
+    sudo make install
+    cd ..
+    
+    log_success "项目安装完成"
+}
+
+# 运行测试
+run_tests() {
+    log_info "运行项目测试..."
+    
+    # 检查必要文件
+    if [ ! -f "bin/BellhopPropagationModel" ]; then
+        log_error "可执行文件不存在，请先构建项目"
+        return 1
+    fi
+    
+    if [ ! -f "input.json" ]; then
+        log_error "测试输入文件 input.json 不存在"
+        return 1
+    fi
+    
+    # 运行测试
+    log_info "使用 input.json 运行测试..."
+    ./bin/BellhopPropagationModel input.json output.json
+    
+    if [ -f "output.json" ]; then
+        log_success "测试运行成功，结果保存在 output.json"
+        echo "输出文件大小: $(ls -lh output.json | awk '{print $5}')"
+    else
+        log_error "测试失败，未生成输出文件"
+        return 1
+    fi
+}
+
+# 运行示例
+run_example() {
+    log_info "运行示例..."
+    
+    # 检查示例目录
+    if [ -d "examples" ]; then
+        local example_script="examples/run_example.sh"
+        if [ -f "$example_script" ]; then
+            bash "$example_script"
+        else
+            log_warning "未找到示例脚本，使用默认测试"
+            run_tests
+        fi
+    else
+        log_warning "未找到示例目录，使用默认测试"
+        run_tests
+    fi
+}
+
+# 初始化项目环境
+setup_environment() {
+    log_info "初始化项目环境..."
+    
+    # 检查 Python 依赖
+    log_info "检查 Python 环境..."
+    python3 -c "import sys; print(f'Python {sys.version}')"
+    
+    # 检查必要的 Python 包
+    local required_packages=("numpy" "json")
+    for package in "${required_packages[@]}"; do
+        if python3 -c "import $package" 2>/dev/null; then
+            echo "  ✅ $package"
+        else
+            echo "  ❌ $package (需要安装)"
+        fi
+    done
+    
+    # 编译 Nuitka 模块
+    if [ ! -f "lib/bellhop.cpython-39-x86_64-linux-gnu.so" ]; then
+        log_info "编译 Nuitka 模块..."
         build_nuitka
-        ;;
-    cpp)
-        cd "$SCRIPT_DIR"
-        build_cpp
-        ;;
-    clean)
-        cd "$SCRIPT_DIR"
-        clean_project
-        ;;
-    test)
-        cd "$SCRIPT_DIR"
-        run_test
-        ;;
-    setup)
-        cd "$SCRIPT_DIR"
-        setup_environment
-        ;;
-    deps)
-        cd "$SCRIPT_DIR"
-        check_dependencies
-        ;;
-    help|--help|-h)
-        show_help
-        ;;
-    *)
-        echo -e "${RED}错误: 未知命令 '$1'${NC}"
-        echo ""
-        show_help
+    fi
+    
+    log_success "环境初始化完成"
+}
+
+# 创建交付包
+create_delivery_package() {
+    log_info "创建项目交付包..."
+    
+    # 检查交付脚本是否存在
+    if [ ! -f "scripts/delivery.sh" ]; then
+        log_error "交付脚本不存在: scripts/delivery.sh"
         exit 1
-        ;;
-esac
+    fi
+    
+    # 执行交付脚本
+    bash scripts/delivery.sh
+}
+
+# 主函数
+main() {
+    case "${1:-help}" in
+        "help"|"-h"|"--help")
+            show_help
+            ;;
+        "status")
+            check_status
+            ;;
+        "build")
+            setup_environment
+            build_nuitka
+            build_project clean
+            ;;
+        "quick-build")
+            build_project
+            ;;
+        "clean")
+            clean_build
+            ;;
+        "install")
+            install_project
+            ;;
+        "test")
+            run_tests
+            ;;
+        "run")
+            run_example
+            ;;
+        "nuitka")
+            build_nuitka
+            ;;
+        "setup")
+            setup_environment
+            ;;
+        "delivery")
+            create_delivery_package
+            ;;
+        *)
+            log_error "未知选项: $1"
+            echo
+            show_help
+            exit 1
+            ;;
+    esac
+}
+
+# 运行主函数
+main "$@"
