@@ -187,8 +187,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
 export LD_LIBRARY_PATH="$PROJECT_DIR/lib:$LD_LIBRARY_PATH"
+export PYTHONPATH="$PROJECT_DIR/lib:$PYTHONPATH"
 
 echo "✅ 环境变量已设置"
+echo "  - LD_LIBRARY_PATH: $PROJECT_DIR/lib"
+echo "  - PYTHONPATH: $PROJECT_DIR/lib"
 echo
 
 # 运行示例

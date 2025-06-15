@@ -10,11 +10,124 @@
 #include <iostream>
 #include <filesystem>
 #include <dlfcn.h>
+#include <vector>
+#include <cstdlib>
 #include "BellhopPropagationModelInterface.h"
 
 // 全局Python解释器状态
 static bool python_initialized = false;
 static PyObject* bellhop_module = nullptr;
+
+/**
+ * 动态检测和设置Python环境
+ */
+bool setup_python_environment() {
+    std::vector<std::string> python_paths = {
+        "/usr/lib/python3.9/site-packages",
+        "/usr/local/lib/python3.9/site-packages", 
+        "/usr/lib/python3/dist-packages",
+        "/usr/local/lib/python3/dist-packages"
+    };
+    
+    // 获取环境变量中的Python路径
+    const char* python_path_env = std::getenv("PYTHONPATH");
+    if (python_path_env) {
+        std::string env_paths(python_path_env);
+        size_t pos = 0;
+        while ((pos = env_paths.find(':')) != std::string::npos) {
+            python_paths.push_back(env_paths.substr(0, pos));
+            env_paths.erase(0, pos + 1);
+        }
+        if (!env_paths.empty()) {
+            python_paths.push_back(env_paths);
+        }
+    }
+    
+    // 动态检测Python安装路径
+    PyRun_SimpleString("import sys, os, subprocess");
+    
+    // 尝试从python3命令获取路径
+    PyRun_SimpleString(R"(
+try:
+    import subprocess
+    result = subprocess.run(['python3', '-c', 'import sys; print(sys.path)'], 
+                          capture_output=True, text=True, timeout=5)
+    if result.returncode == 0:
+        import ast
+        detected_paths = ast.literal_eval(result.stdout.strip())
+        for path in detected_paths:
+            if path and os.path.exists(path):
+                sys.path.insert(0, path)
+except:
+    pass
+)");
+    
+    // 添加检测到的路径
+    for (const auto& path : python_paths) {
+        if (std::filesystem::exists(path)) {
+            std::string cmd = "import sys; path = r'" + path + "'; path not in sys.path and sys.path.append(path)";
+            PyRun_SimpleString(cmd.c_str());
+        }
+    }
+    
+    return true;
+}
+
+/**
+ * 检测Python环境和必需依赖
+ */
+bool check_python_dependencies() {
+    std::cout << "🔍 检测Python环境..." << std::endl;
+    
+    // 检测Python版本
+    PyRun_SimpleString(R"(
+import sys
+print(f"✓ Python版本: {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}")
+)");
+    
+    // 检测并尝试导入numpy
+    int numpy_result = PyRun_SimpleString(R"(
+try:
+    import numpy as np
+    print(f"✓ NumPy版本: {np.__version__}")
+    print(f"  路径: {np.__file__}")
+except ImportError as e:
+    print(f"❌ NumPy未安装: {e}")
+    raise
+except Exception as e:
+    print(f"❌ NumPy导入失败: {e}")
+    raise
+)");
+    
+    if (numpy_result != 0) {
+        std::cerr << "❌ NumPy依赖检测失败" << std::endl;
+        PyErr_Clear();
+        return false;
+    }
+    
+    // 检测并尝试导入scipy
+    int scipy_result = PyRun_SimpleString(R"(
+try:
+    import scipy
+    print(f"✓ SciPy版本: {scipy.__version__}")
+    print(f"  路径: {scipy.__file__}")
+except ImportError as e:
+    print(f"⚠️  SciPy未安装: {e}")
+    print("  注意: 某些功能可能受限")
+except Exception as e:
+    print(f"⚠️  SciPy导入失败: {e}")
+    print("  注意: 某些功能可能受限")
+)");
+    
+    // SciPy不是必须的，只是警告
+    if (scipy_result != 0) {
+        std::cout << "⚠️  SciPy检测失败，继续运行但部分功能可能受限" << std::endl;
+        PyErr_Clear();
+    }
+    
+    std::cout << "✅ Python环境检测完成" << std::endl;
+    return true;
+}
 
 /**
  * 初始化Python环境和Nuitka模块
@@ -26,9 +139,29 @@ bool initialize_python_environment() {
     
     try {
         // 预加载Python共享库以解决符号链接问题
-        void* python_lib = dlopen("libpython3.9.so", RTLD_LAZY | RTLD_GLOBAL);
+        // 尝试多个可能的Python库版本
+        void* python_lib = nullptr;
+        std::vector<std::string> python_libs = {
+            "libpython3.9.so",
+            "libpython3.9.so.1.0", 
+            "libpython3.8.so",
+            "libpython3.8.so.1.0",
+            "libpython3.10.so",
+            "libpython3.10.so.1.0",
+            "libpython3.11.so",
+            "libpython3.11.so.1.0"
+        };
+        
+        for (const auto& lib : python_libs) {
+            python_lib = dlopen(lib.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+            if (python_lib) {
+                std::cout << "✓ 成功加载Python库: " << lib << std::endl;
+                break;
+            }
+        }
+        
         if (!python_lib) {
-            python_lib = dlopen("libpython3.9.so.1.0", RTLD_LAZY | RTLD_GLOBAL);
+            std::cerr << "⚠️  未找到兼容的Python共享库，尝试使用系统默认..." << std::endl;
         }
         
         // 初始化Python解释器
@@ -45,6 +178,19 @@ bool initialize_python_environment() {
             PyRun_SimpleString("os.environ['PYTHONIOENCODING'] = 'utf-8'");
             PyRun_SimpleString("sys.stdout.reconfigure(encoding='utf-8', errors='ignore')");
             PyRun_SimpleString("sys.stderr.reconfigure(encoding='utf-8', errors='ignore')");
+            
+            // 动态设置Python环境
+            if (!setup_python_environment()) {
+                std::cerr << "Failed to setup Python environment" << std::endl;
+                return false;
+            }
+        }
+        
+        // 检测Python环境和必需依赖
+        if (!check_python_dependencies()) {
+            std::cerr << "❌ Python依赖检测失败" << std::endl;
+            std::cerr << "💡 请确保已安装：pip install numpy scipy" << std::endl;
+            return false;
         }
         
         // 自动添加lib目录到Python搜索路径
@@ -52,9 +198,21 @@ bool initialize_python_environment() {
         Dl_info dl_info;
         if (dladdr((void*)initialize_python_environment, &dl_info) && dl_info.dli_fname) {
             std::filesystem::path lib_path = std::filesystem::path(dl_info.dli_fname).parent_path();
+            
+            // 如果当前是在bin目录，需要找到对应的lib目录
+            if (lib_path.filename() == "bin") {
+                lib_path = lib_path.parent_path() / "lib";
+            }
+            
             std::string python_code = "import sys; lib_path = r'" + lib_path.string() + 
                                     "'; lib_path not in sys.path and sys.path.insert(0, lib_path)";
             PyRun_SimpleString(python_code.c_str());
+            
+            // 输出调试信息
+            std::string debug_code = "print('Added lib path:', r'" + lib_path.string() + "')";
+            PyRun_SimpleString(debug_code.c_str());
+            std::string debug_code2 = "print('Python sys.path:', sys.path[:3])";
+            PyRun_SimpleString(debug_code2.c_str());
         }
         
         // 导入bellhop_wrapper模块（现在应该能从lib目录找到）
@@ -90,107 +248,110 @@ void cleanup_python_environment() {
             Py_DECREF(bellhop_module);
             bellhop_module = nullptr;
         }
+        
+        // 注意：不要调用Py_Finalize()，因为可能还有其他地方在使用Python
         python_initialized = false;
-    } catch (...) {
-        python_initialized = false;
+    } catch (const std::exception& e) {
+        std::cerr << "Exception during Python cleanup: " << e.what() << std::endl;
     }
 }
 
 /**
- * 主计算函数：Bellhop声传播模型求解
+ * 主计算函数 - 使用Nuitka编译的Python模块
  */
-extern "C" int SolveBellhopPropagationModel(const std::string& json, std::string& outJson) {
+int SolveBellhopPropagationModel(const std::string& input_json, std::string& output_json) {
     try {
         // 确保Python环境已初始化
         if (!initialize_python_environment()) {
-            outJson = R"({"error_code": 500, "error_message": "Failed to initialize Python environment"})";
-            return 500;
-        }
-        
-        // 验证输入参数
-        if (json.empty()) {
-            outJson = R"({"error_code": 400, "error_message": "Input JSON is empty"})";
-            return 400;
-        }
-        
-        // 获取Python函数
-        PyObject* solve_function = PyObject_GetAttrString(bellhop_module, "solve_bellhop_propagation");
-        if (!solve_function || !PyCallable_Check(solve_function)) {
-            if (solve_function) Py_DECREF(solve_function);
-            outJson = R"({"error_code": 500, "error_message": "solve_bellhop_propagation function not available"})";
-            return 500;
-        }
-        
-        // 准备Python参数
-        PyObject* input_json = PyUnicode_FromString(json.c_str());
-        if (!input_json) {
-            Py_DECREF(solve_function);
-            outJson = R"({"error_code": 500, "error_message": "Failed to create input JSON string"})";
+            output_json = R"({"error_code": 500, "error_message": "Failed to initialize Python environment"})";
             return 500;
         }
         
         // 调用Python函数
-        PyObject* result = PyObject_CallFunctionObjArgs(solve_function, input_json, NULL);
-        
-        // 清理参数
-        Py_DECREF(input_json);
-        Py_DECREF(solve_function);
-        
-        // 处理调用结果
-        if (!result) {
-            PyErr_Print();
-            outJson = R"({"error_code": 500, "error_message": "Python function call failed"})";
+        PyObject* solve_function = PyObject_GetAttrString(bellhop_module, "solve_bellhop_propagation");
+        if (!solve_function || !PyCallable_Check(solve_function)) {
+            output_json = R"({"error_code": 500, "error_message": "Function solve_bellhop_propagation not found or not callable"})";
             return 500;
         }
         
-        // 提取返回值
+        // 创建参数
+        PyObject* input_py_str = PyUnicode_FromString(input_json.c_str());
+        if (!input_py_str) {
+            Py_DECREF(solve_function);
+            output_json = R"({"error_code": 500, "error_message": "Failed to create input string"})";
+            return 500;
+        }
+        
+        // 调用函数
+        PyObject* args = PyTuple_New(1);
+        PyTuple_SetItem(args, 0, input_py_str);  // PyTuple_SetItem会获取引用
+        
+        PyObject* result = PyObject_CallObject(solve_function, args);
+        Py_DECREF(args);
+        Py_DECREF(solve_function);
+        
+        if (!result) {
+            PyErr_Print();
+            output_json = R"({"error_code": 500, "error_message": "Python function call failed"})";
+            return 500;
+        }
+        
+        // Python函数返回JSON字符串（不是元组）
         if (PyUnicode_Check(result)) {
-            const char* result_str = PyUnicode_AsUTF8(result);
-            if (result_str) {
-                outJson = std::string(result_str);
-                Py_DECREF(result);
-                return 200;
+            const char* json_str = PyUnicode_AsUTF8(result);
+            if (json_str) {
+                output_json = std::string(json_str);
+                
+                // 解析JSON获取error_code
+                try {
+                    // 简单的error_code提取（避免引入JSON库依赖）
+                    std::string json_content = output_json;
+                    size_t error_code_pos = json_content.find("\"error_code\"");
+                    if (error_code_pos != std::string::npos) {
+                        size_t colon_pos = json_content.find(":", error_code_pos);
+                        if (colon_pos != std::string::npos) {
+                            size_t start = colon_pos + 1;
+                            // 跳过空格
+                            while (start < json_content.length() && isspace(json_content[start])) start++;
+                            
+                            size_t end = start;
+                            while (end < json_content.length() && isdigit(json_content[end])) end++;
+                            
+                            if (end > start) {
+                                int error_code = std::stoi(json_content.substr(start, end - start));
+                                Py_DECREF(result);
+                                return error_code;
+                            }
+                        }
+                    }
+                    // 如果没有找到error_code，默认返回200（成功）
+                    Py_DECREF(result);
+                    return 200;
+                } catch (const std::exception& e) {
+                    // JSON解析失败，但有结果，默认成功
+                    Py_DECREF(result);
+                    return 200;
+                }
             } else {
+                output_json = R"({"error_code": 500, "error_message": "Failed to decode Python result"})";
                 Py_DECREF(result);
-                outJson = R"({"error_code": 500, "error_message": "Failed to convert Python result to UTF-8"})";
                 return 500;
             }
         } else {
             Py_DECREF(result);
-            outJson = R"({"error_code": 500, "error_message": "Python function returned non-string result"})";
+            output_json = R"({"error_code": 500, "error_message": "Python function returned non-string result"})";
             return 500;
         }
-    } catch (...) {
-        outJson = R"({"error_code": 500, "error_message": "Unknown C++ exception"})";
+        
+    } catch (const std::exception& e) {
+        output_json = R"({"error_code": 500, "error_message": "C++ exception: )" + std::string(e.what()) + R"("})";
         return 500;
     }
 }
 
 /**
- * 获取库版本信息
+ * 获取版本信息
  */
-extern "C" const char* GetBellhopPropagationModelVersion() {
+const char* GetBellhopPropagationModelVersion() {
     return "1.0.0-nuitka";
-}
-
-/**
- * 库初始化函数
- */
-extern "C" void __attribute__((constructor)) init_library() {
-    // 库加载时的简单初始化
-}
-
-/**
- * 库清理函数
- */
-extern "C" void __attribute__((destructor)) cleanup_library() {
-    if (bellhop_module) {
-        try {
-            Py_DECREF(bellhop_module);
-            bellhop_module = nullptr;
-        } catch (...) {
-            // 忽略清理时的异常
-        }
-    }
-    python_initialized = false;
 }

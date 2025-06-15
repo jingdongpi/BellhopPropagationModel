@@ -210,3 +210,4 @@ examples/
 
 *.tar.gz
 *.zip
+out*.json

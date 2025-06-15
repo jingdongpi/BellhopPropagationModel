@@ -19,11 +19,20 @@
 - **架构**: x86_64
 
 ### Python 环境 (必须安装)
-- **Python 版本**: 3.8 或更高版本
+- **Python 版本**: 3.8 - 3.11 (自动检测兼容版本)
 - **必需 Python 库**:
   ```bash
   pip install numpy scipy
   ```
+
+### 🔄 自动环境适配
+程序启动时会自动：
+- 检测可用的 Python 版本 (3.8/3.9/3.10/3.11)
+- 自动搜索 numpy/scipy 安装路径
+- 动态设置 Python 模块搜索路径
+- 提供详细的依赖检测报告
+
+如果环境检测失败，程序会提供具体的安装建议。
 
 ### 可选依赖 (仅编译示例时需要)
 - **编译器**: GCC 7.0+
@@ -42,8 +51,9 @@ python3 -c "import numpy, scipy; print('环境检查通过')"
 
 ### 2. 运行可执行文件
 ```bash
-# 设置库路径
-export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
+# 设置环境变量（必须）
+export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH  # 动态库路径
+export PYTHONPATH=$PWD/lib:$PYTHONPATH           # Python模块路径
 
 # 使用默认输入文件
 ./bin/BellhopPropagationModel examples/input.json output.json
@@ -52,8 +62,9 @@ export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
 ls -la output.json
 ```
 
-### 3. 一键测试脚本
+### 3. 一键测试脚本（推荐）
 ```bash
+# 自动设置环境变量并运行测试
 ./scripts/quick_start.sh
 ```
 
