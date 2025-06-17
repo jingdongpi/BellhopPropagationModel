@@ -200,7 +200,8 @@ bool initialize_python_environment() {
             return false;
         }
         
-        // 自动添加lib目录到Python搜索路径
+        // 自动添加lib目录到Python搜索路径（仅在Linux/Unix系统）
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__MINGW32__) && !defined(__MINGW64__)
         // 通过dladdr获取当前动态库的路径，然后推断lib目录位置
         Dl_info dl_info;
         if (dladdr((void*)initialize_python_environment, &dl_info) && dl_info.dli_fname) {
@@ -221,6 +222,23 @@ bool initialize_python_environment() {
             std::string debug_code2 = "print('Python sys.path:', sys.path[:3])";
             PyRun_SimpleString(debug_code2.c_str());
         }
+#else
+        // Windows平台：添加当前目录和lib目录到Python搜索路径
+        std::string python_code = R"(
+import sys
+import os
+# 添加当前工作目录
+current_dir = os.getcwd()
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
+# 添加lib目录
+lib_dir = os.path.join(current_dir, 'lib')
+if os.path.exists(lib_dir) and lib_dir not in sys.path:
+    sys.path.insert(0, lib_dir)
+print('Added Windows paths to sys.path')
+)";
+        PyRun_SimpleString(python_code.c_str());
+#endif
         
         // 导入bellhop_wrapper模块（现在应该能从lib目录找到）
         bellhop_module = PyImport_ImportModule("bellhop_wrapper");
