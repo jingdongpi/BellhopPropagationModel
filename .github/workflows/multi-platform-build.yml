@@ -1,7 +1,4 @@
-name: Multi-Platform       python_versions:
-        description: 'Python 版本 (用逗号分隔)'
-        required: false
-        default: '3.8,3.9,3.10,3.11,3.12'd
+name: Multi-Platform
 
 on:
   workflow_dispatch:
