@@ -362,3 +362,20 @@ int SolveBellhopPropagationModel(const std::string& input_json, std::string& out
 const char* GetBellhopPropagationModelVersion() {
     return "1.0.0-nuitka";
 }
+
+// 编译器和平台检测（用于调试）
+#ifdef _WIN32
+    #ifdef __MINGW32__
+        // MinGW 32位编译器
+        #pragma message("编译器：MinGW 32位")
+    #elif defined(__MINGW64__)
+        // MinGW 64位编译器
+        #pragma message("编译器：MinGW 64位")
+    #else
+        // 其他Windows编译器（如MSVC）
+        #pragma message("编译器：Windows 其他编译器")
+    #endif
+#else
+    // Unix/Linux编译器
+    #pragma message("编译器：Unix/Linux")
+#endif
