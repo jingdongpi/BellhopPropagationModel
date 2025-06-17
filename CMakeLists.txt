@@ -31,8 +31,57 @@ message(STATUS "Python3 executable: ${Python3_EXECUTABLE}")
 message(STATUS "Python3 libraries: ${Python3_LIBRARIES}")
 message(STATUS "Python3 include dirs: ${Python3_INCLUDE_DIRS}")
 
-# 检查Python库类型并处理PIC问题，同时设置RPATH
+# 改进Python库查找策略，优先使用动态库
+set(PYTHON_LIB_DIRS "")
+set(PYTHON_RUNTIME_LIBS "")
+
 if(Python3_LIBRARIES)
+    # 获取Python库目录
+    get_filename_component(PYTHON_LIB_DIR "${Python3_LIBRARIES}" DIRECTORY)
+    list(APPEND PYTHON_LIB_DIRS "${PYTHON_LIB_DIR}")
+    message(STATUS "Primary Python library directory: ${PYTHON_LIB_DIR}")
+    
+    # 检测Python可执行文件路径，推断可能的库路径
+    if(Python3_EXECUTABLE)
+        get_filename_component(PYTHON_BIN_DIR "${Python3_EXECUTABLE}" DIRECTORY)
+        get_filename_component(PYTHON_PREFIX "${PYTHON_BIN_DIR}" DIRECTORY)
+        
+        # 常见的Python库路径模式
+        set(POTENTIAL_LIB_DIRS
+            "${PYTHON_PREFIX}/lib"
+            "${PYTHON_PREFIX}/lib64"  
+            "${PYTHON_BIN_DIR}/../lib"
+            "${PYTHON_BIN_DIR}/../lib64"
+        )
+        
+        foreach(potential_dir ${POTENTIAL_LIB_DIRS})
+            if(EXISTS "${potential_dir}" AND NOT "${potential_dir}" IN_LIST PYTHON_LIB_DIRS)
+                list(APPEND PYTHON_LIB_DIRS "${potential_dir}")
+                message(STATUS "Additional Python library directory: ${potential_dir}")
+            endif()
+        endforeach()
+    endif()
+    
+    # 查找Python动态库
+    set(PYTHON_SO_NAMES 
+        "libpython${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}.so"
+        "libpython${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}.so.1.0"
+        "libpython${Python3_VERSION_MAJOR}.so"
+        "libpython.so"
+    )
+    
+    foreach(lib_dir ${PYTHON_LIB_DIRS})
+        foreach(so_name ${PYTHON_SO_NAMES})
+            set(potential_so "${lib_dir}/${so_name}")
+            if(EXISTS "${potential_so}")
+                list(APPEND PYTHON_RUNTIME_LIBS "${potential_so}")
+                message(STATUS "Found Python shared library: ${potential_so}")
+                break()
+            endif()
+        endforeach()
+    endforeach()
+    
+    # 检查现有Python库类型
     foreach(lib ${Python3_LIBRARIES})
         if(EXISTS "${lib}")
             message(STATUS "Python library found: ${lib}")
@@ -41,6 +90,8 @@ if(Python3_LIBRARIES)
             get_filename_component(PYTHON_LIB_EXT "${lib}" EXT)
             if(PYTHON_LIB_EXT STREQUAL ".a")
                 message(STATUS "  -> Static library detected, enabling PIC compilation")
+            elseif(PYTHON_LIB_EXT STREQUAL ".so")
+                message(STATUS "  -> Shared library detected")
             endif()
             
             # 检查是否为符号链接
@@ -52,10 +103,6 @@ if(Python3_LIBRARIES)
             message(WARNING "Python library not found: ${lib}")
         endif()
     endforeach()
-    
-    # 获取Python库目录用于RPATH设置
-    get_filename_component(PYTHON_LIB_DIR "${Python3_LIBRARIES}" DIRECTORY)
-    message(STATUS "Python library directory: ${PYTHON_LIB_DIR}")
 endif()
 
 # 在Linux系统上，设置RPATH以便运行时能找到动态库
@@ -64,18 +111,24 @@ if(UNIX AND NOT APPLE)
     set(CMAKE_BUILD_WITH_INSTALL_RPATH FALSE)
     set(CMAKE_INSTALL_RPATH_USE_LINK_PATH TRUE)
     
-    # 添加常见的Python库路径到RPATH
+    # 添加检测到的Python库路径到RPATH
+    if(PYTHON_LIB_DIRS)
+        foreach(lib_dir ${PYTHON_LIB_DIRS})
+            list(APPEND CMAKE_INSTALL_RPATH "${lib_dir}")
+        endforeach()
+    endif()
+    
+    # 添加常见的系统库路径到RPATH
     list(APPEND CMAKE_INSTALL_RPATH 
         "/usr/lib/x86_64-linux-gnu"
+        "/usr/lib/aarch64-linux-gnu"  # ARM64 support
         "/usr/lib64"
         "/usr/lib"
         "/usr/local/lib"
+        "/usr/local/lib64"
+        "$ORIGIN/../lib"               # 相对路径，程序所在目录的lib目录
+        "$ORIGIN"                      # 程序所在目录
     )
-    
-    # 如果找到了Python库目录，也添加到RPATH
-    if(PYTHON_LIB_DIR)
-        list(APPEND CMAKE_INSTALL_RPATH "${PYTHON_LIB_DIR}")
-    endif()
     
     message(STATUS "RPATH will include: ${CMAKE_INSTALL_RPATH}")
 endif()
@@ -142,12 +195,14 @@ if(BUILD_SHARED_LIBS)
     )
     
     # 设置RPATH以便运行时找到Python动态库
-    if(UNIX AND Python3_LIBRARIES)
-        get_filename_component(PYTHON_LIB_DIR ${Python3_LIBRARIES} DIRECTORY)
+    if(UNIX AND PYTHON_LIB_DIRS)
+        # 将所有Python库目录添加到RPATH
+        string(REPLACE ";" ":" PYTHON_RPATH "${PYTHON_LIB_DIRS}")
         set_target_properties(BellhopPropagationModel PROPERTIES
-            INSTALL_RPATH "${PYTHON_LIB_DIR}"
+            INSTALL_RPATH "${PYTHON_RPATH}:$ORIGIN:$ORIGIN/../lib"
             BUILD_WITH_INSTALL_RPATH TRUE
         )
+        message(STATUS "BellhopPropagationModel RPATH: ${PYTHON_RPATH}:$ORIGIN:$ORIGIN/../lib")
     endif()
     
     # 安装规则
@@ -167,6 +222,17 @@ if(BUILD_EXECUTABLE)
         RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/bin
         OUTPUT_NAME BellhopPropagationModel
     )
+    
+    # 设置RPATH以便运行时找到Python动态库
+    if(UNIX AND PYTHON_LIB_DIRS)
+        # 将所有Python库目录添加到RPATH
+        string(REPLACE ";" ":" PYTHON_RPATH "${PYTHON_LIB_DIRS}")
+        set_target_properties(BellhopPropagationModel_exe PROPERTIES
+            INSTALL_RPATH "${PYTHON_RPATH}:$ORIGIN:$ORIGIN/../lib"
+            BUILD_WITH_INSTALL_RPATH TRUE
+        )
+        message(STATUS "BellhopPropagationModel_exe RPATH: ${PYTHON_RPATH}:$ORIGIN:$ORIGIN/../lib")
+    endif()
     
     # 安装规则
     install(TARGETS BellhopPropagationModel_exe
