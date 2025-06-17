@@ -241,39 +241,39 @@ jobs:
           New-Item -ItemType Directory -Force -Path "C:\mingw-temp"
           Set-Location "C:\mingw-temp"
           
-          # 下载 MinGW-w64 6.3.0 (x86_64-posix-seh)
-          Write-Host "正在下载 MinGW 6.3.0..."
+          # 下载 MinGW-w64 6.3.0 (i686-win32-dwarf) - 32位版本
+          Write-Host "正在下载 MinGW 6.3.0 (32位)..."
           
-          # 定义多个下载源
+          # 定义多个下载源（32位版本）
           $downloadUrls = @(
-            "https://github.com/niXman/mingw-builds-binaries/releases/download/6.3.0-rt_v5-rev2/x86_64-6.3.0-release-posix-seh-rt_v5-rev2.7z",
-            "https://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win64/Personal%20Builds/mingw-builds/6.3.0/threads-posix/seh/x86_64-6.3.0-release-posix-seh-rt_v5-rev2.7z/download"
+            "https://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win32/Personal%20Builds/mingw-builds/6.3.0/threads-win32/dwarf/i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z/download",
+            "https://github.com/niXman/mingw-builds-binaries/releases/download/6.3.0-rt_v5-rev2/i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z"
           )
           
           $downloadSuccess = $false
           foreach ($url in $downloadUrls) {
             try {
               Write-Host "尝试从: $url"
-              Invoke-WebRequest -Uri $url -OutFile "mingw-6.3.0.7z" -TimeoutSec 300
+              Invoke-WebRequest -Uri $url -OutFile "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -TimeoutSec 300
               
               # 验证下载的文件
-              $fileSize = (Get-Item "mingw-6.3.0.7z").Length
+              $fileSize = (Get-Item "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z").Length
               Write-Host "下载文件大小: $($fileSize / 1MB) MB"
               
               if ($fileSize -gt 1MB) {
                 # 检查文件头是否为7z格式
-                $fileHeader = Get-Content "mingw-6.3.0.7z" -Encoding Byte -TotalCount 6
+                $fileHeader = Get-Content "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -Encoding Byte -TotalCount 6
                 if ($fileHeader[0] -eq 55 -and $fileHeader[1] -eq 122) {  # "7z" magic number
                   Write-Host "✓ 下载完成，文件格式验证通过"
                   $downloadSuccess = $true
                   break
                 } else {
                   Write-Host "❌ 文件格式错误，尝试下一个源..."
-                  Remove-Item "mingw-6.3.0.7z" -Force
+                  Remove-Item "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -Force
                 }
               } else {
                 Write-Host "❌ 文件太小，可能是错误页面，尝试下一个源..."
-                Remove-Item "mingw-6.3.0.7z" -Force
+                Remove-Item "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -Force
               }
             } catch {
               Write-Host "❌ 下载失败: $($_.Exception.Message)"
@@ -283,10 +283,8 @@ jobs:
           if (-not $downloadSuccess) {
             Write-Host "❌ 所有下载源都失败，使用系统现有的MinGW"
             Write-Host "MinGW 版本信息:"
-            gcc --version
+            try { gcc --version } catch { Write-Host "gcc 不可用" }
             $env:PATH = "C:\tools\mingw64\bin;C:\msys64\mingw64\bin;$env:PATH"
-          } else {
-          
           } else {
             # 安装 7-Zip 用于解压
             if (!(Get-Command 7z -ErrorAction SilentlyContinue)) {
@@ -299,24 +297,29 @@ jobs:
             # 解压到 C:\mingw-6.3.0
             Write-Host "解压 MinGW 6.3.0..."
             try {
-              & 7z x mingw-6.3.0.7z -o"C:\" -y
+              & 7z x "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -o"C:\" -y
               
               # 重命名目录（如果需要）
-              if (Test-Path "C:\mingw64") {
+              # 32位版本的目录结构通常是 i686-6.3.0-release-win32-dwarf-rt_v5-rev2/mingw32
+              if (Test-Path "C:\i686-6.3.0-release-win32-dwarf-rt_v5-rev2") {
                 if (Test-Path "C:\mingw-6.3.0") {
                   Remove-Item "C:\mingw-6.3.0" -Recurse -Force
                 }
-                Rename-Item "C:\mingw64" "C:\mingw-6.3.0"
-                Write-Host "✓ MinGW 6.3.0 解压并重命名完成"
-              } elseif (Test-Path "C:\x86_64-6.3.0-release-posix-seh-rt_v5-rev2") {
+                if (Test-Path "C:\i686-6.3.0-release-win32-dwarf-rt_v5-rev2\mingw32") {
+                  Move-Item "C:\i686-6.3.0-release-win32-dwarf-rt_v5-rev2\mingw32" "C:\mingw-6.3.0"
+                } else {
+                  Rename-Item "C:\i686-6.3.0-release-win32-dwarf-rt_v5-rev2" "C:\mingw-6.3.0"
+                }
+                Write-Host "✓ MinGW 6.3.0 (32位) 解压并重命名完成"
+              } elseif (Test-Path "C:\mingw32") {
                 if (Test-Path "C:\mingw-6.3.0") {
                   Remove-Item "C:\mingw-6.3.0" -Recurse -Force
                 }
-                Rename-Item "C:\x86_64-6.3.0-release-posix-seh-rt_v5-rev2" "C:\mingw-6.3.0"
-                Write-Host "✓ MinGW 6.3.0 解压并重命名完成"
+                Rename-Item "C:\mingw32" "C:\mingw-6.3.0"
+                Write-Host "✓ MinGW 6.3.0 (32位) 解压并重命名完成"
               } else {
                 Write-Host "❌ 解压后未找到预期的目录结构"
-                Get-ChildItem "C:\" | Where-Object { $_.Name -like "*mingw*" -or $_.Name -like "*6.3.0*" }
+                Get-ChildItem "C:\" | Where-Object { $_.Name -like "*mingw*" -or $_.Name -like "*6.3.0*" -or $_.Name -like "*i686*" }
               }
             } catch {
               Write-Host "❌ 解压失败: $($_.Exception.Message)"
@@ -347,7 +350,18 @@ jobs:
         Write-Host "最终 MinGW 版本信息:"
         try {
           gcc --version
-          Write-Host "✓ gcc 可用"
+          g++ --version
+          Write-Host "✓ gcc/g++ 可用"
+          
+          # 检查是否为32位版本
+          $gccTarget = & gcc -dumpmachine
+          Write-Host "GCC 目标平台: $gccTarget"
+          
+          if ($gccTarget -like "*i686*" -or $gccTarget -like "*i386*") {
+            Write-Host "✓ 确认使用32位MinGW编译器"
+          } else {
+            Write-Host "⚠️ 警告：可能未使用32位编译器，目标平台: $gccTarget"
+          }
         } catch {
           Write-Host "❌ gcc 不可用"
           # 显示PATH以便调试
@@ -387,12 +401,12 @@ jobs:
           -DBUILD_EXECUTABLE=ON `
           -DBUILD_SHARED_LIBS=ON `
           -DPython3_EXECUTABLE="$pythonExe" `
-          -DCMAKE_C_COMPILER="C:/mingw-6.3.0/bin/gcc.exe" `
-          -DCMAKE_CXX_COMPILER="C:/mingw-6.3.0/bin/g++.exe"
+          -DCMAKE_C_COMPILER="gcc" `
+          -DCMAKE_CXX_COMPILER="g++"
         
         # 编译
         Write-Host "开始编译..."
-        C:\mingw-6.3.0\bin\mingw32-make.exe -j4
+        mingw32-make.exe -j4
         
         # 编译 Python 模块
         Set-Location ..
