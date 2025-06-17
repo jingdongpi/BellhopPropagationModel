@@ -157,17 +157,40 @@ if [[ "$PYTHON_VERSION" == "3.8" ]]; then
     echo "✓ 创建符号链接: $(which python3) -> /usr/local/bin/python"
   fi
 elif [[ "$PYTHON_VERSION" == "3.9" ]]; then
-  yum install -y python39 python39-devel python39-pip || (
-    echo "Python 3.9 yum 安装失败，尝试其他方法..."
-    yum install -y python3 python3-devel python3-pip || true
-  )
-  # 创建python符号链接，优先使用具体版本
-  if command -v python3.9 >/dev/null 2>&1; then
-    ln -sf $(which python3.9) /usr/local/bin/python
-    echo "✓ 创建符号链接: $(which python3.9) -> /usr/local/bin/python"
-  elif command -v python3 >/dev/null 2>&1; then
-    ln -sf $(which python3) /usr/local/bin/python
-    echo "✓ 创建符号链接: $(which python3) -> /usr/local/bin/python"
+  echo "Python 3.9 在 CentOS 7 中需要从源码编译..."
+  # 先尝试yum安装，如果失败则从源码编译
+  if yum install -y python39 python39-devel python39-pip 2>/dev/null; then
+    echo "✓ 通过yum成功安装Python 3.9"
+    # 创建python符号链接
+    if command -v python3.9 >/dev/null 2>&1; then
+      ln -sf $(which python3.9) /usr/local/bin/python
+      echo "✓ 创建符号链接: $(which python3.9) -> /usr/local/bin/python"
+    fi
+  else
+    echo "yum安装失败，从源码编译Python 3.9..."
+    
+    # 安装编译依赖
+    yum install -y openssl-devel libffi-devel zlib-devel bzip2-devel \
+                   readline-devel sqlite-devel xz-devel tk-devel \
+                   gdbm-devel libuuid-devel
+    
+    cd /tmp
+    wget https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
+    tar xzf Python-3.9.18.tgz
+    cd Python-3.9.18
+    ./configure --enable-optimizations --enable-shared --prefix=/usr/local
+    make -j$(nproc)
+    make altinstall
+    
+    # 确保动态库可以被找到
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf
+    ldconfig
+    
+    # 创建python符号链接
+    if [ -f /usr/local/bin/python3.9 ]; then
+      ln -sf /usr/local/bin/python3.9 /usr/local/bin/python
+      echo "✓ 创建符号链接: /usr/local/bin/python3.9 -> /usr/local/bin/python"
+    fi
   fi
 else
   # 从源码编译其他版本 (3.10, 3.11, 3.12)
@@ -235,19 +258,48 @@ if ! command -v pip &> /dev/null; then
   esac
   
   # 使用正确的Python版本运行pip安装脚本
+  echo "检测可用的Python解释器..."
+  
+  # 尝试多种Python命令检测
+  PYTHON_CMD=""
+  
   if command -v python${PYTHON_VERSION} >/dev/null 2>&1; then
-    echo "使用 python${PYTHON_VERSION} 运行 pip 安装脚本..."
-    python${PYTHON_VERSION} get-pip.py
+    PYTHON_CMD="python${PYTHON_VERSION}"
+    echo "✓ 找到: python${PYTHON_VERSION}"
   elif [ -f /usr/local/bin/python${PYTHON_VERSION} ]; then
-    echo "使用 /usr/local/bin/python${PYTHON_VERSION} 运行 pip 安装脚本..."
-    /usr/local/bin/python${PYTHON_VERSION} get-pip.py
+    PYTHON_CMD="/usr/local/bin/python${PYTHON_VERSION}"
+    echo "✓ 找到: /usr/local/bin/python${PYTHON_VERSION}"
   elif command -v python3 >/dev/null 2>&1; then
-    echo "使用 python3 运行 pip 安装脚本..."
-    python3 get-pip.py
-  else
+    PYTHON_CMD="python3"
+    echo "✓ 找到: python3"
+    python3 --version
+  elif [ -f /usr/local/bin/python ]; then
+    PYTHON_CMD="/usr/local/bin/python"
+    echo "✓ 找到: /usr/local/bin/python"
+    /usr/local/bin/python --version
+  elif command -v python >/dev/null 2>&1; then
+    # 检查是否是Python 3
+    if python --version 2>&1 | grep -q "Python 3"; then
+      PYTHON_CMD="python"
+      echo "✓ 找到: python (Python 3)"
+      python --version
+    else
+      echo "⚠️  找到python但是Python 2版本，继续查找..."
+    fi
+  fi
+  
+  if [ -z "$PYTHON_CMD" ]; then
     echo "❌ 未找到合适的Python 3解释器"
+    echo "调试信息："
+    echo "  which python: $(which python 2>/dev/null || echo '未找到')"
+    echo "  which python3: $(which python3 2>/dev/null || echo '未找到')"
+    echo "  ls /usr/bin/python*: $(ls /usr/bin/python* 2>/dev/null || echo '未找到')"
+    echo "  ls /usr/local/bin/python*: $(ls /usr/local/bin/python* 2>/dev/null || echo '未找到')"
     exit 1
   fi
+  
+  echo "使用 $PYTHON_CMD 运行 pip 安装脚本..."
+  $PYTHON_CMD get-pip.py
   
   rm get-pip.py
 fi
