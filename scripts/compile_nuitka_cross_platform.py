@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 增强的 Nuitka 编译脚本 - 跨平台版本
 支持 Linux 和 Windows 平台的 Python 模块编译
@@ -10,6 +11,18 @@ import subprocess
 import shutil
 import platform
 from pathlib import Path
+
+# Windows编码修复：强制UTF-8
+if platform.system() == 'Windows':
+    # 设置环境变量
+    os.environ['PYTHONIOENCODING'] = 'utf-8'
+    os.environ['PYTHONUTF8'] = '1'
+    
+    # 重新配置stdout和stderr
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
 
 def check_dependencies():
     """检查必要的依赖库"""
@@ -39,8 +52,8 @@ def check_dependencies():
         missing_deps.append("nuitka")
     
     if missing_deps:
-        print(f"❌ 缺少必要依赖: {', '.join(missing_deps)}")
-        print("请运行: pip install " + " ".join(missing_deps))
+        print(f"❌ Missing required dependencies: {', '.join(missing_deps)}")
+        print("Please run: pip install " + " ".join(missing_deps))
         return False
     
     return True
@@ -137,10 +150,10 @@ def compile_module(source_file, lib_dir, platform_info, force=False):
     needs_compile, reason = needs_recompile(source_file, output_file, force)
     
     if not needs_compile:
-        print(f"⏭️  跳过 {source_file.name} ({reason})")
+        print(f"⏭️  Skip {source_file.name} ({reason})")
         return True
     
-    print(f"🔨 编译 {source_file.name} ({reason})...")
+    print(f"🔨 Compiling {source_file.name} ({reason})...")
     
     cmd = get_nuitka_command(source_file, lib_dir, platform_info)
     
@@ -162,20 +175,20 @@ def compile_module(source_file, lib_dir, platform_info, force=False):
                     break
         
         result = subprocess.run(cmd, check=True, capture_output=True, text=True, env=env)
-        print(f"✅ {source_file.name} 编译成功")
+        print(f"✅ {source_file.name} compilation successful")
         
         # 验证输出文件
         output_file = get_output_filename(source_file, lib_dir, platform_info)
         if output_file.exists():
-            print(f"   输出: {output_file.name}")
+            print(f"   Output: {output_file.name}")
         else:
-            print(f"⚠️  警告: 编译成功但未找到预期的输出文件 {output_file.name}")
+            print(f"⚠️  Warning: Compilation succeeded but expected output file {output_file.name} not found")
         
         return True
         
     except subprocess.CalledProcessError as e:
-        print(f"❌ {source_file.name} 编译失败")
-        print(f"   错误: {e}")
+        print(f"❌ {source_file.name} compilation failed")
+        print(f"   Error: {e}")
         if e.stdout:
             print(f"   stdout: {e.stdout}")
         if e.stderr:
@@ -196,18 +209,18 @@ def compile_all_modules(project_root, force=False):
     # 确保lib目录存在
     lib_dir.mkdir(exist_ok=True)
     
-    print("\n=== 开始编译模块 ===")
+    print("\n=== Starting Module Compilation ===")
     if force:
-        print("模式: 强制重编译所有文件")
+        print("Mode: Force recompile all files")
     else:
-        print("模式: 增量编译（只编译有变化的文件）")
+        print("Mode: Incremental compilation (only changed files)")
     
     total_compiled = 0
     total_skipped = 0
     total_failed = 0
     
     # 编译 python_core 模块
-    print("\n--- 编译核心模块 ---")
+    print("\n--- Compiling Core Modules ---")
     core_modules = ["bellhop.py", "readwrite.py", "env.py", "project.py"]
     
     for module in core_modules:
@@ -218,10 +231,10 @@ def compile_all_modules(project_root, force=False):
             else:
                 total_failed += 1
         else:
-            print(f"⚠️  跳过不存在的模块: {module}")
+            print(f"⚠️  Skip non-existent module: {module}")
     
     # 编译 python_wrapper 模块
-    print("\n--- 编译包装模块 ---")
+    print("\n--- Compiling Wrapper Modules ---")
     wrapper_modules = ["bellhop_wrapper.py"]
     
     for module in wrapper_modules:
@@ -232,26 +245,27 @@ def compile_all_modules(project_root, force=False):
             else:
                 total_failed += 1
         else:
-            print(f"⚠️  跳过不存在的模块: {module}")
+            print(f"⚠️  Skip non-existent module: {module}")
     
     # 总结
-    print(f"\n=== 编译完成 ===")
-    print(f"成功编译: {total_compiled} 个模块")
-    print(f"编译失败: {total_failed} 个模块")
+    print(f"\n=== Compilation Complete ===")
+    print(f"Successfully compiled: {total_compiled} modules")
+    print(f"Failed compilation: {total_failed} modules")
     
     if total_failed > 0:
-        print(f"❌ 有 {total_failed} 个模块编译失败")
+        print(f"❌ {total_failed} modules failed to compile")
         return False
     else:
-        print("✅ 所有模块编译成功")
+        print("✅ All modules compiled successfully")
         return True
 
 def main():
     """主函数"""
     project_root = Path(__file__).parent.parent
     
-    print("=== Nuitka 跨平台模块编译器 ===")
-    print(f"项目根目录: {project_root}")
+    print("=== Nuitka Cross-Platform Module Compiler ===")
+    print(f"Project root: {project_root}")
+    print(f"Platform: {platform.system()}")
     
     # 检查依赖
     if not check_dependencies():
