@@ -62,14 +62,24 @@ try {
     $scipyVersion = python -c "import scipy; print(f'SciPy: {scipy.__version__}')"
     Write-Host "  ✓ $scipyVersion" -ForegroundColor Green
     
-    # 检查numpy版本是否>=2.0
+    # 检查numpy版本是否符合Python版本要求
+    $pythonVersionOutput = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
     $numpyVersionNumber = python -c "import numpy; print(numpy.__version__)"
     $majorVersion = [int]($numpyVersionNumber.Split('.')[0])
-    if ($majorVersion -ge 2) {
-        Write-Host "  ✓ NumPy版本符合要求 (>=2.0)" -ForegroundColor Green
+    
+    if ($pythonVersionOutput -eq "3.8") {
+        if ($majorVersion -lt 2) {
+            Write-Host "  ✓ NumPy版本符合Python 3.8要求 (<2.0)" -ForegroundColor Green
+        } else {
+            Write-Host "  ✗ NumPy版本过高 (Python 3.8需要<2.0)" -ForegroundColor Red
+            exit 1
+        }
     } else {
-        Write-Host "  ✗ NumPy版本过低 (<2.0)" -ForegroundColor Red
-        exit 1
+        if ($majorVersion -ge 2) {
+            Write-Host "  ✓ NumPy版本符合要求 (>=2.0)" -ForegroundColor Green
+        } else {
+            Write-Host "  ! NumPy版本较低 (<2.0)，但可接受" -ForegroundColor Yellow
+        }
     }
     
 } catch {

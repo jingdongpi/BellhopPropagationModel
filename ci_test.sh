@@ -62,6 +62,24 @@ print(f'  Python版本: {sys.version}')
 try:
     import numpy
     print(f'  ✓ NumPy: {numpy.__version__}')
+    
+    # 检查NumPy版本要求（根据Python版本）
+    python_version = f'{sys.version_info.major}.{sys.version_info.minor}'
+    numpy_version = numpy.__version__
+    major_version = int(numpy_version.split('.')[0])
+    
+    if python_version == '3.8':
+        if major_version < 2:
+            print(f'  ✓ NumPy版本符合Python 3.8要求 (<2.0)')
+        else:
+            print(f'  ✗ NumPy版本过高 (Python 3.8需要<2.0)')
+            sys.exit(1)
+    else:
+        if major_version >= 2:
+            print(f'  ✓ NumPy版本符合要求 (>=2.0)')
+        else:
+            print(f'  ! NumPy版本较低 (<2.0)，但可接受')
+            
 except ImportError:
     print('  ✗ NumPy 不可用')
     sys.exit(1)
