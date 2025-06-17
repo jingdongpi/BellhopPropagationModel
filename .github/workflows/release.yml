@@ -1,0 +1,132 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # 当推送标签时触发，如 v1.0.0
+  workflow_dispatch:  # 允许手动触发
+    inputs:
+      version:
+        description: 'Release version (e.g., v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+
+jobs:
+  release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+        
+    - name: Install dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y \
+          build-essential \
+          cmake \
+          gcc \
+          g++ \
+          make \
+          python3-dev \
+          python3-pip \
+          libpython3-dev \
+          pkg-config \
+          tar \
+          gzip
+        python -m pip install --upgrade pip
+        pip install numpy scipy
+        
+    - name: Build release version
+      run: |
+        ./manager.sh build
+        
+    - name: Create delivery package
+      run: |
+        # 如果有delivery命令，使用它
+        if grep -q "delivery" manager.sh; then
+          ./manager.sh delivery
+        else
+          # 手动创建发布包
+          mkdir -p release
+          cp -r bin lib include examples docs README.md release/
+          tar -czf BellhopPropagationModel-release.tar.gz -C release .
+        fi
+        
+    - name: List release files
+      run: |
+        echo "=== Release files ==="
+        find . -name "*.tar.gz" -o -name "*Release*" -o -name "*Delivery*" | head -10
+        ls -la *.tar.gz || echo "No tar.gz files found"
+        
+    - name: Get release version
+      id: get_version
+      run: |
+        if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+        else
+          echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        fi
+        
+    - name: Create Release
+      id: create_release
+      uses: actions/create-release@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        tag_name: ${{ steps.get_version.outputs.version }}
+        release_name: BellhopPropagationModel ${{ steps.get_version.outputs.version }}
+        body: |
+          ## BellhopPropagationModel Release ${{ steps.get_version.outputs.version }}
+          
+          ### 📦 包含内容
+          - 🔧 编译后的可执行文件
+          - 📚 动态库文件
+          - 📖 头文件和文档
+          - 🔬 使用示例
+          
+          ### 🚀 使用方法
+          ```bash
+          # 解压发布包
+          tar -xzf BellhopPropagationModel-*.tar.gz
+          
+          # 运行程序
+          ./bin/BellhopPropagationModel input.json output.json
+          ```
+          
+          ### 📋 系统要求
+          - Linux 系统
+          - Python 3.8+
+          - NumPy, SciPy
+          
+          ---
+          自动构建于: ${{ github.sha }}
+        draft: false
+        prerelease: false
+        
+    - name: Upload release package
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./BellhopPropagationModel-release.tar.gz
+        asset_name: BellhopPropagationModel-${{ steps.get_version.outputs.version }}-linux.tar.gz
+        asset_content_type: application/gzip
+        
+    - name: Upload delivery package (if exists)
+      if: hashFiles('**/BellhopPropagationModel_*_Delivery*.tar.gz') != ''
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ steps.create_release.outputs.upload_url }}
+        asset_path: ./BellhopPropagationModel_*_Delivery*.tar.gz
+        asset_name: BellhopPropagationModel-${{ steps.get_version.outputs.version }}-delivery.tar.gz
+        asset_content_type: application/gzip
