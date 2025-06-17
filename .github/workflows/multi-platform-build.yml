@@ -200,12 +200,68 @@ jobs:
         # 安装构建工具
         choco install -y cmake
         
-        # 安装 MinGW 6.3.0 特定版本
+        # 安装 MinGW 6.3.0 特定版本（直接下载）
         Write-Host "安装 MinGW 6.3.0..."
-        choco install -y mingw --version 6.3.0 --allow-downgrade
         
-        # 确保 MinGW 在 PATH 中
-        $env:PATH = "C:\tools\mingw64\bin;$env:PATH"
+        # 检查是否已经安装了正确版本
+        $gccVersion = ""
+        try {
+          $gccOutput = & gcc --version 2>$null | Select-Object -First 1
+          if ($gccOutput -match "6\.3\.0") {
+            Write-Host "✓ MinGW 6.3.0 已安装"
+            $gccVersion = "6.3.0"
+          }
+        } catch {
+          Write-Host "未检测到 MinGW 6.3.0"
+        }
+        
+        if ($gccVersion -ne "6.3.0") {
+          Write-Host "下载并安装 MinGW-w64 6.3.0..."
+          
+          # 创建临时目录
+          New-Item -ItemType Directory -Force -Path "C:\mingw-temp"
+          Set-Location "C:\mingw-temp"
+          
+          # 下载 MinGW-w64 6.3.0 (x86_64-posix-seh)
+          $mingwUrl = "https://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win64/Personal%20Builds/mingw-builds/6.3.0/threads-posix/seh/x86_64-6.3.0-release-posix-seh-rt_v5-rev2.7z/download"
+          Write-Host "正在下载 MinGW 6.3.0..."
+          
+          try {
+            Invoke-WebRequest -Uri $mingwUrl -OutFile "mingw-6.3.0.7z" -TimeoutSec 300
+            Write-Host "✓ 下载完成"
+          } catch {
+            Write-Host "❌ 下载失败，尝试备用链接..."
+            # 备用下载链接
+            $backupUrl = "https://github.com/niXman/mingw-builds-binaries/releases/download/6.3.0-rt_v5-rev2/x86_64-6.3.0-release-posix-seh-rt_v5-rev2.7z"
+            Invoke-WebRequest -Uri $backupUrl -OutFile "mingw-6.3.0.7z" -TimeoutSec 300
+          }
+          
+          # 安装 7-Zip 用于解压
+          if (!(Get-Command 7z -ErrorAction SilentlyContinue)) {
+            choco install -y 7zip
+          }
+          
+          # 解压到 C:\mingw-6.3.0
+          Write-Host "解压 MinGW 6.3.0..."
+          & 7z x mingw-6.3.0.7z -o"C:\"
+          
+          # 重命名目录
+          if (Test-Path "C:\mingw64") {
+            if (Test-Path "C:\mingw-6.3.0") {
+              Remove-Item "C:\mingw-6.3.0" -Recurse -Force
+            }
+            Rename-Item "C:\mingw64" "C:\mingw-6.3.0"
+          }
+          
+          # 清理临时文件
+          Set-Location "C:\"
+          Remove-Item "C:\mingw-temp" -Recurse -Force
+          
+          Write-Host "✓ MinGW 6.3.0 安装完成"
+        }
+        
+        # 确保 MinGW 6.3.0 在 PATH 中
+        $env:PATH = "C:\mingw-6.3.0\bin;$env:PATH"
         Write-Host "MinGW 版本信息:"
         gcc --version
         
@@ -231,15 +287,23 @@ jobs:
         
         # 配置 CMake
         $pythonExe = (Get-Command python).Source
+        Write-Host "配置 CMake..."
+        Write-Host "Python 可执行文件: $pythonExe"
+        Write-Host "GCC 路径: $(Get-Command gcc).Source"
+        Write-Host "G++ 路径: $(Get-Command g++).Source"
+        
         cmake .. `
           -G "MinGW Makefiles" `
           -DCMAKE_BUILD_TYPE=Release `
           -DBUILD_EXECUTABLE=ON `
           -DBUILD_SHARED_LIBS=ON `
-          -DPython3_EXECUTABLE="$pythonExe"
+          -DPython3_EXECUTABLE="$pythonExe" `
+          -DCMAKE_C_COMPILER="C:/mingw-6.3.0/bin/gcc.exe" `
+          -DCMAKE_CXX_COMPILER="C:/mingw-6.3.0/bin/g++.exe"
         
         # 编译
-        mingw32-make -j4
+        Write-Host "开始编译..."
+        C:\mingw-6.3.0\bin\mingw32-make.exe -j4
         
         # 编译 Python 模块
         Set-Location ..
