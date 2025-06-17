@@ -1,21 +1,59 @@
+"""
+Bellhop配置文件
+"""
+import os
+from pathlib import Path
+
+# 项目根目录和二进制文件路径
+PROJECT_ROOT = Path(__file__).parent.parent
+BUILTIN_BIN_DIR = PROJECT_ROOT / "bin"
+
+def get_binary_path():
+    """获取二进制文件路径，使用项目bin目录"""
+    return str(BUILTIN_BIN_DIR)
+
+# 设置二进制文件路径 - 固定使用项目bin目录
+AtBinPath = get_binary_path()
+
+# 检查bellhop二进制文件是否存在
+def check_bellhop_binary():
+    """检查bellhop二进制文件是否存在"""
+    bellhop_path = BUILTIN_BIN_DIR / "bellhop"
+    if not bellhop_path.exists():
+        print(f"⚠️  Warning: bellhop binary not found at {bellhop_path}")
+        print("   Please place the bellhop binary file in the project's bin/ directory")
+        return False
+    return True
+
+# 在模块加载时检查二进制文件
+if not check_bellhop_binary():
+    print(f"   Expected path: {BUILTIN_BIN_DIR / 'bellhop'}")
+else:
+    print(f"✓ Found bellhop binary at: {BUILTIN_BIN_DIR / 'bellhop'}")
+
+# 工作目录配置 - 使用统一的项目管理
+try:
+    from .project import ensure_project_dirs, get_project_root, get_data_path, get_tmp_path
+    ensure_project_dirs()
+    WORK_DIR = str(Path(__file__).parent)
+    DATA_DIR = get_data_path()
+    TMP_DIR = get_tmp_path()
+except ImportError:
+    # 备用方案
+    from pathlib import Path
+    WORK_DIR = str(Path(__file__).parent)
+    DATA_DIR = str(Path(__file__).parent.parent / "data")
+    TMP_DIR = str(Path(__file__).parent.parent / "data" / "tmp")
+    Path(TMP_DIR).mkdir(parents=True, exist_ok=True)
+
 try:
     # 尝试相对导入 (用于包模式)
     from .readwrite import write_env, read_shd, get_rays
     from .env import Pos, Source, Dom, cInt, SSPraw, SSP, HS, BotBndry, TopBndry, Bndry, Box, Beam
-    from .config import AtBinPath
-    from .logger import log_info, log_debug, log_warning
 except ImportError:
     # 尝试绝对导入 (用于直接脚本模式)
     from readwrite import write_env, read_shd, get_rays
     from env import Pos, Source, Dom, cInt, SSPraw, SSP, HS, BotBndry, TopBndry, Bndry, Box, Beam
-    from config import AtBinPath
-    try:
-        from logger import log_info, log_debug, log_warning
-    except ImportError:
-        # 如果logger不可用，定义简单的占位函数
-        def log_info(msg): pass
-        def log_debug(msg): pass  
-        def log_warning(msg): pass
 
 from os import system
 import numpy as np
@@ -51,14 +89,11 @@ def call_Bellhop_multi_freq(frequencies, source_depth, receiver_depths, receiver
     
     Returns:
         (Pos1, TL_multi, pressure_multi) where TL_multi and pressure_multi have frequency dimension
-    """
-    # 确保频率是数组
+    """    # 确保频率是数组
     if not isinstance(frequencies, (list, np.ndarray)):
         frequencies = [frequencies]
     frequencies = np.array(frequencies)
     Nfreq = len(frequencies)
-    
-    log_debug(f"Starting multi-frequency calculation for {Nfreq} frequencies: {frequencies}")
     
     # Source and receiving position setup (similar to WGNPd implementation)
     filename = 'data/tmp/multi_freq'
@@ -215,10 +250,7 @@ def call_Bellhop_multi_freq(frequencies, source_depth, receiver_depths, receiver
             # 计算传输损失
             TL_multi[iF, :, :] = calculate_transmission_loss(pressure_sum)
             
-            if return_pressure:
-                Pressure[0, iF, :, :] = pressure_sum[0, 0, :, :]
-    
-    log_debug(f"Multi-frequency calculation completed for {Nfreq} frequencies")
+            if return_pressure:                Pressure[0, iF, :, :] = pressure_sum[0, 0, :, :]
     
     if return_pressure:
         Pressure = np.squeeze(Pressure)

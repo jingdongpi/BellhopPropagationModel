@@ -204,6 +204,7 @@ cython_debug/
 
 .vscode/
 BellhopPropagationModel_Delivery/
+bin/
 build_cython/
 data/
 examples/

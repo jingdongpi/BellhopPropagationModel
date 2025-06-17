@@ -83,6 +83,18 @@ copy_core_files() {
     
     # 复制二进制文件
     cp bin/BellhopPropagationModel "$DELIVERY_DIR/bin/"
+    
+    # 复制 bellhop 二进制文件（重要！）
+    if [ -f "bin/bellhop" ]; then
+        cp bin/bellhop "$DELIVERY_DIR/bin/"
+        log_success "bellhop 二进制文件已复制"
+    else
+        log_error "bellhop 二进制文件不存在: bin/bellhop"
+        log_info "请确保 bellhop 二进制文件位于 bin/ 目录中"
+        exit 1
+    fi
+    
+    # 复制动态库
     cp lib/libBellhopPropagationModel.so "$DELIVERY_DIR/lib/"
     
     # 复制头文件
@@ -101,13 +113,28 @@ copy_examples() {
     
     cd "$PROJECT_ROOT"
     
-    # 复制示例文件
+    # 复制示例源代码
     cp examples/use_library_example.cpp "$DELIVERY_DIR/examples/"
-    cp examples/run_example.sh "$DELIVERY_DIR/examples/"
     
-    # 复制输入示例
-    cp input.json "$DELIVERY_DIR/examples/" 2>/dev/null || true
+    # 复制输入示例文件（确保从正确位置复制）
+    if [ -f "examples/input.json" ]; then
+        cp examples/input.json "$DELIVERY_DIR/examples/"
+        log_success "input.json 已复制到示例目录"
+    else
+        log_warning "input.json 未找到，示例可能无法正常运行"
+    fi
+    
+    # 复制其他输入任务文件
     cp examples/input_task*.json "$DELIVERY_DIR/examples/" 2>/dev/null || true
+    
+    # 复制 examples 中的运行脚本
+    if [ -f "examples/run_example.sh" ]; then
+        cp examples/run_example.sh "$DELIVERY_DIR/examples/"
+        chmod +x "$DELIVERY_DIR/examples/run_example.sh"
+        log_success "run_example.sh 已复制到 examples 目录"
+    else
+        log_warning "examples/run_example.sh 未找到"
+    fi
     
     log_success "示例文件复制完成"
 }
@@ -134,20 +161,30 @@ copy_delivery_readme() {
 
 ## 快速开始
 
-1. 设置环境变量:
+1. **必须设置环境变量** (动态库运行必需):
    ```bash
    export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
    ```
 
 2. 运行快速开始脚本:
    ```bash
-   ./scripts/quick_start.sh
+   ./quick_start.sh
    ```
 
-3. 或直接运行可执行文件:
+3. 或运行动态库示例:
+   ```bash
+   cd examples
+   ./run_example.sh
+   ```
+
+4. 或直接运行可执行文件:
    ```bash
    ./bin/BellhopPropagationModel examples/input.json output.json
    ```
+
+## 重要说明
+
+⚠️  **必须设置 `LD_LIBRARY_PATH`**：项目使用自定义动态库，系统无法在标准路径中找到，因此必须设置此环境变量指向 `lib/` 目录。
 
 ## 系统要求
 
@@ -159,14 +196,22 @@ copy_delivery_readme() {
 EOF
         log_warning "已创建简化版 README"
     fi
+    
+    # 复制 scripts 文件夹中的 README.md
+    if [ -f "scripts/README.md" ]; then
+        cp "scripts/README.md" "$DELIVERY_DIR/scripts/"
+        log_success "scripts/README.md 已复制到交付包"
+    else
+        log_warning "scripts/README.md 未找到"
+    fi
 }
 
 # 创建部署脚本
 create_deployment_scripts() {
     log_info "创建部署脚本..."
     
-    # 创建快速开始脚本
-    cat > "$DELIVERY_DIR/scripts/quick_start.sh" << 'EOF'
+    # 创建快速开始脚本（放在项目根目录）
+    cat > "$DELIVERY_DIR/quick_start.sh" << 'EOF'
 #!/bin/bash
 
 # BellhopPropagationModel 快速开始脚本
@@ -184,7 +229,7 @@ echo "✅ Python3: $(python3 --version)"
 
 # 设置环境变量
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_DIR="$SCRIPT_DIR"
 
 export LD_LIBRARY_PATH="$PROJECT_DIR/lib:$LD_LIBRARY_PATH"
 export PYTHONPATH="$PROJECT_DIR/lib:$PYTHONPATH"
@@ -216,41 +261,18 @@ fi
 
 echo
 echo "🎉 快速开始完成！"
-echo "更多使用方法请参考 README.md"
+echo
+echo "📖 更多使用方法:"
+echo "  - 查看项目文档: cat README.md"
+echo "  - 查看脚本说明: cat scripts/README.md"
+echo "  - 测试动态库示例: cd examples && ./run_example.sh"
+echo "  - 运行C++可执行文件: ./bin/BellhopPropagationModel examples/input.json output.json"
 EOF
 
-    chmod +x "$DELIVERY_DIR/scripts/quick_start.sh"
+    chmod +x "$DELIVERY_DIR/quick_start.sh"
     
-    # 创建编译示例脚本
-    cat > "$DELIVERY_DIR/scripts/compile_example.sh" << 'EOF'
-#!/bin/bash
-
-# 编译 C++ 示例程序
-
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-
-echo "编译 C++ 示例程序..."
-
-cd "$PROJECT_DIR/examples"
-
-g++ -std=c++17 -Wall -O2 \
-    -I../include \
-    -o use_library_example \
-    use_library_example.cpp \
-    -L../lib \
-    -lBellhopPropagationModel
-
-if [ -f "use_library_example" ]; then
-    echo "✅ 编译成功"
-    echo "运行示例: ./use_library_example"
-else
-    echo "❌ 编译失败"
-    exit 1
-fi
-EOF
-
-    chmod +x "$DELIVERY_DIR/scripts/compile_example.sh"
+    log_info "注意：quick_start.sh 脚本已放在项目根目录"
+    log_info "注意：run_example.sh 脚本已从 examples 目录复制"
     
     log_success "部署脚本创建完成"
 }
@@ -334,7 +356,9 @@ show_delivery_summary() {
     echo "🚀 用户使用方法:"
     echo "  1. 解压: tar -xzf ${PACKAGE_NAME}.tar.gz"
     echo "  2. 进入: cd ${PACKAGE_NAME}"
-    echo "  3. 快速开始: ./scripts/quick_start.sh"
+    echo "  3. 快速开始: ./quick_start.sh"
+    echo "  4. 动态库示例: cd examples && ./run_example.sh"
+    echo "  5. 查看说明: cat README.md 和 cat scripts/README.md"
     echo
     echo "✅ 交付完成!"
 }
