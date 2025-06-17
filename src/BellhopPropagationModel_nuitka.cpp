@@ -34,6 +34,137 @@ std::string get_parent_path(const std::string& path) {
     return "";
 }
 
+// 动态检测并加载Python库
+bool load_python_library_dynamically() {
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__MINGW32__) && !defined(__MINGW64__)
+    static bool already_loaded = false;
+    if (already_loaded) return true;
+    
+    std::cout << "🔍 智能检测Python环境..." << std::endl;
+    
+    // Python库搜索路径优先级列表
+    std::vector<std::string> search_paths;
+    
+    // 1. 从环境变量获取Python可执行文件路径
+    std::string python_executable;
+    const char* python_env = std::getenv("PYTHON_EXECUTABLE");
+    if (python_env) {
+        python_executable = python_env;
+    } else {
+        // 尝试常见的Python命令
+        std::vector<std::string> python_cmds = {"python3", "python", "python3.12", "python3.11", "python3.10", "python3.9", "python3.8"};
+        for (const auto& cmd : python_cmds) {
+            std::string check_cmd = "which " + cmd + " 2>/dev/null";
+            FILE* fp = popen(check_cmd.c_str(), "r");
+            if (fp) {
+                char path[1024];
+                if (fgets(path, sizeof(path), fp) != NULL) {
+                    // 移除换行符
+                    python_executable = std::string(path);
+                    if (!python_executable.empty() && python_executable.back() == '\n') {
+                        python_executable.pop_back();
+                    }
+                    if (file_exists(python_executable)) {
+                        std::cout << "✓ 检测到Python: " << python_executable << std::endl;
+                        break;
+                    }
+                }
+                pclose(fp);
+            }
+        }
+    }
+    
+    // 2. 获取Python版本和库路径
+    std::string python_version;
+    if (!python_executable.empty()) {
+        std::string version_cmd = python_executable + " -c \"import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')\" 2>/dev/null";
+        FILE* fp = popen(version_cmd.c_str(), "r");
+        if (fp) {
+            char version[32];
+            if (fgets(version, sizeof(version), fp) != NULL) {
+                python_version = std::string(version);
+                if (!python_version.empty() && python_version.back() == '\n') {
+                    python_version.pop_back();
+                }
+                std::cout << "✓ Python版本: " << python_version << std::endl;
+            }
+            pclose(fp);
+        }
+        
+        // 从Python获取库路径
+        std::string lib_cmd = python_executable + " -c \"import sysconfig, os; print(sysconfig.get_config_var('LIBDIR') or '')\" 2>/dev/null";
+        fp = popen(lib_cmd.c_str(), "r");
+        if (fp) {
+            char lib_path[1024];
+            if (fgets(lib_path, sizeof(lib_path), fp) != NULL) {
+                std::string lib_dir(lib_path);
+                if (!lib_dir.empty() && lib_dir.back() == '\n') {
+                    lib_dir.pop_back();
+                }
+                if (!lib_dir.empty() && file_exists(lib_dir)) {
+                    search_paths.push_back(lib_dir);
+                    std::cout << "✓ Python库目录: " << lib_dir << std::endl;
+                }
+            }
+            pclose(fp);
+        }
+        
+        // 从可执行文件路径推断
+        std::string bin_dir = get_parent_path(python_executable);
+        std::string prefix = get_parent_path(bin_dir);
+        search_paths.push_back(prefix + "/lib");
+        search_paths.push_back(prefix + "/lib64");
+    }
+    
+    // 3. 添加系统标准路径
+    std::vector<std::string> system_paths = {
+        "/usr/lib/x86_64-linux-gnu", "/usr/lib/aarch64-linux-gnu",
+        "/usr/lib64", "/usr/lib", "/usr/local/lib", "/usr/local/lib64"
+    };
+    search_paths.insert(search_paths.end(), system_paths.begin(), system_paths.end());
+    
+    // 4. 尝试加载Python库
+    std::vector<std::string> lib_names;
+    if (!python_version.empty()) {
+        // 优先尝试检测到的版本
+        lib_names.push_back("libpython" + python_version + ".so.1.0");
+        lib_names.push_back("libpython" + python_version + ".so");
+    }
+    // 通用名称
+    lib_names.insert(lib_names.end(), {
+        "libpython3.12.so.1.0", "libpython3.12.so",
+        "libpython3.11.so.1.0", "libpython3.11.so",
+        "libpython3.10.so.1.0", "libpython3.10.so",
+        "libpython3.9.so.1.0", "libpython3.9.so",
+        "libpython3.8.so.1.0", "libpython3.8.so",
+        "libpython3.so", "libpython.so"
+    });
+    
+    for (const auto& path : search_paths) {
+        for (const auto& lib_name : lib_names) {
+            std::string full_path = path + "/" + lib_name;
+            if (file_exists(full_path)) {
+                // 尝试加载库
+                void* handle = dlopen(full_path.c_str(), RTLD_LAZY | RTLD_GLOBAL);
+                if (handle) {
+                    std::cout << "✅ 成功加载Python库: " << full_path << std::endl;
+                    already_loaded = true;
+                    return true;
+                } else {
+                    std::cout << "⚠️ 找到但无法加载: " << full_path << " - " << dlerror() << std::endl;
+                }
+            }
+        }
+    }
+    
+    std::cout << "⚠️ 未找到可加载的Python库，使用默认链接" << std::endl;
+    return false;
+#else
+    // Windows平台暂时返回true
+    return true;
+#endif
+}
+
 // 全局Python解释器状态
 static bool python_initialized = false;
 static PyObject* bellhop_module = nullptr;
@@ -155,6 +286,12 @@ except Exception as e:
 bool initialize_python_environment() {
     if (python_initialized) {
         return true;
+    }
+    
+    // 首先尝试智能检测和加载Python库
+    std::cout << "=== 智能Python环境检测 ===" << std::endl;
+    if (!load_python_library_dynamically()) {
+        std::cout << "⚠️ 动态加载失败，将使用默认Python库" << std::endl;
     }
     
     try {

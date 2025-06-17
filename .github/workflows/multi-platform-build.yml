@@ -217,157 +217,57 @@ jobs:
         }
         
         # 安装构建工具
-        choco install -y cmake
+        choco install -y cmake mingw
         
-        # 安装 MinGW 6.3.0 特定版本（直接下载）
-        Write-Host "安装 MinGW 6.3.0..."
+        # 确保MinGW在PATH中
+        $env:PATH = "C:\tools\mingw64\bin;C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin;$env:PATH"
         
-        # 检查是否已经安装了正确版本
-        $gccVersion = ""
+        # 检查MinGW安装
+        Write-Host "检查MinGW安装..."
         try {
           $gccOutput = & gcc --version 2>$null | Select-Object -First 1
-          if ($gccOutput -match "6\.3\.0") {
-            Write-Host "✓ MinGW 6.3.0 已安装"
-            $gccVersion = "6.3.0"
-          }
+          Write-Host "✓ 找到GCC: $gccOutput"
         } catch {
-          Write-Host "未检测到 MinGW 6.3.0"
-        }
-        
-        if ($gccVersion -ne "6.3.0") {
-          Write-Host "下载并安装 MinGW-w64 6.3.0..."
-          
-          # 创建临时目录
-          New-Item -ItemType Directory -Force -Path "C:\mingw-temp"
-          Set-Location "C:\mingw-temp"
-          
-          # 下载 MinGW-w64 6.3.0 (i686-win32-dwarf) - 32位版本
-          Write-Host "正在下载 MinGW 6.3.0 (32位)..."
-          
-          # 定义多个下载源（32位版本）
-          $downloadUrls = @(
-            "https://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win32/Personal%20Builds/mingw-builds/6.3.0/threads-win32/dwarf/i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z/download",
-            "https://github.com/niXman/mingw-builds-binaries/releases/download/6.3.0-rt_v5-rev2/i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z"
+          Write-Host "❌ 未找到GCC，尝试其他路径..."
+          # 尝试添加更多可能的路径
+          $mingwPaths = @(
+            "C:\tools\mingw64\bin",
+            "C:\ProgramData\chocolatey\lib\mingw\tools\install\mingw64\bin",
+            "C:\msys64\mingw64\bin",
+            "C:\MinGW\bin"
           )
           
-          $downloadSuccess = $false
-          foreach ($url in $downloadUrls) {
-            try {
-              Write-Host "尝试从: $url"
-              Invoke-WebRequest -Uri $url -OutFile "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -TimeoutSec 300
-              
-              # 验证下载的文件
-              $fileSize = (Get-Item "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z").Length
-              Write-Host "下载文件大小: $($fileSize / 1MB) MB"
-              
-              if ($fileSize -gt 1MB) {
-                # 检查文件头是否为7z格式
-                $fileHeader = Get-Content "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -Encoding Byte -TotalCount 6
-                if ($fileHeader[0] -eq 55 -and $fileHeader[1] -eq 122) {  # "7z" magic number
-                  Write-Host "✓ 下载完成，文件格式验证通过"
-                  $downloadSuccess = $true
+          foreach ($path in $mingwPaths) {
+            if (Test-Path $path) {
+              $env:PATH = "$path;$env:PATH"
+              Write-Host "添加到PATH: $path"
+              try {
+                $gccOutput = & gcc --version 2>$null | Select-Object -First 1
+                if ($gccOutput) {
+                  Write-Host "✓ 找到GCC: $gccOutput"
                   break
-                } else {
-                  Write-Host "❌ 文件格式错误，尝试下一个源..."
-                  Remove-Item "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -Force
                 }
-              } else {
-                Write-Host "❌ 文件太小，可能是错误页面，尝试下一个源..."
-                Remove-Item "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -Force
+              } catch {
+                continue
               }
-            } catch {
-              Write-Host "❌ 下载失败: $($_.Exception.Message)"
             }
-          }
-          
-          if (-not $downloadSuccess) {
-            Write-Host "❌ 所有下载源都失败，使用系统现有的MinGW"
-            Write-Host "MinGW 版本信息:"
-            try { gcc --version } catch { Write-Host "gcc 不可用" }
-            $env:PATH = "C:\tools\mingw64\bin;C:\msys64\mingw64\bin;$env:PATH"
-          } else {
-            # 安装 7-Zip 用于解压
-            if (!(Get-Command 7z -ErrorAction SilentlyContinue)) {
-              Write-Host "安装 7-Zip..."
-              choco install -y 7zip
-              # 刷新环境变量
-              $env:PATH = "$env:PATH;C:\Program Files\7-Zip"
-            }
-            
-            # 解压到 C:\mingw-6.3.0
-            Write-Host "解压 MinGW 6.3.0..."
-            try {
-              & 7z x "i686-6.3.0-release-win32-dwarf-rt_v5-rev2.7z" -o"C:\" -y
-              
-              # 重命名目录（如果需要）
-              # 32位版本的目录结构通常是 i686-6.3.0-release-win32-dwarf-rt_v5-rev2/mingw32
-              if (Test-Path "C:\i686-6.3.0-release-win32-dwarf-rt_v5-rev2") {
-                if (Test-Path "C:\mingw-6.3.0") {
-                  Remove-Item "C:\mingw-6.3.0" -Recurse -Force
-                }
-                if (Test-Path "C:\i686-6.3.0-release-win32-dwarf-rt_v5-rev2\mingw32") {
-                  Move-Item "C:\i686-6.3.0-release-win32-dwarf-rt_v5-rev2\mingw32" "C:\mingw-6.3.0"
-                } else {
-                  Rename-Item "C:\i686-6.3.0-release-win32-dwarf-rt_v5-rev2" "C:\mingw-6.3.0"
-                }
-                Write-Host "✓ MinGW 6.3.0 (32位) 解压并重命名完成"
-              } elseif (Test-Path "C:\mingw32") {
-                if (Test-Path "C:\mingw-6.3.0") {
-                  Remove-Item "C:\mingw-6.3.0" -Recurse -Force
-                }
-                Rename-Item "C:\mingw32" "C:\mingw-6.3.0"
-                Write-Host "✓ MinGW 6.3.0 (32位) 解压并重命名完成"
-              } else {
-                Write-Host "❌ 解压后未找到预期的目录结构"
-                Get-ChildItem "C:\" | Where-Object { $_.Name -like "*mingw*" -or $_.Name -like "*6.3.0*" -or $_.Name -like "*i686*" }
-              }
-            } catch {
-              Write-Host "❌ 解压失败: $($_.Exception.Message)"
-              Write-Host "使用系统现有的MinGW"
-            }
-            
-            # 清理临时文件
-            Remove-Item "C:\mingw-temp" -Recurse -Force -ErrorAction SilentlyContinue
-          }
-        }
         
         # 确保切换回项目根目录
         Set-Location $env:GITHUB_WORKSPACE
-        Write-Host "切换回项目根目录: $(Get-Location)"
+        Write-Host "当前工作目录: $(Get-Location)"
         
-        # 确保正确的 MinGW 在 PATH 中
-        $mingwPaths = @(
-          "C:\mingw-6.3.0\bin",
-          "C:\tools\mingw64\bin",
-          "C:\msys64\mingw64\bin"
-        )
-        
-        foreach ($path in $mingwPaths) {
-          if (Test-Path $path) {
-            $env:PATH = "$path;$env:PATH"
-            Write-Host "使用 MinGW 路径: $path"
-            break
-          }
-        }
-        
-        Write-Host "最终 MinGW 版本信息:"
+        # 最终检查MinGW安装
+        Write-Host "检查MinGW版本信息:"
         try {
-          gcc --version
-          g++ --version
-          Write-Host "✓ gcc/g++ 可用"
+          $gccOutput = & gcc --version 2>$null | Select-Object -First 1
+          $gppOutput = & g++ --version 2>$null | Select-Object -First 1
+          Write-Host "✓ GCC: $gccOutput"
+          Write-Host "✓ G++: $gppOutput"
           
-          # 检查是否为32位版本
-          $gccTarget = & gcc -dumpmachine
-          Write-Host "GCC 目标平台: $gccTarget"
-          
-          if ($gccTarget -like "*i686*" -or $gccTarget -like "*i386*") {
-            Write-Host "✓ 确认使用32位MinGW编译器"
-          } else {
-            Write-Host "⚠️ 警告：可能未使用32位编译器，目标平台: $gccTarget"
-          }
+          $gccTarget = & gcc -dumpmachine 2>$null
+          Write-Host "✓ 目标平台: $gccTarget"
         } catch {
-          Write-Host "❌ gcc 不可用"
-          # 显示PATH以便调试
+          Write-Host "❌ MinGW编译器不可用"
           Write-Host "当前 PATH: $env:PATH"
         }
         
