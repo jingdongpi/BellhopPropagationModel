@@ -63,10 +63,14 @@ else
   wget https://www.python.org/ftp/python/${DOWNLOAD_VERSION}/Python-${DOWNLOAD_VERSION}.tgz
   tar xzf Python-${DOWNLOAD_VERSION}.tgz
   cd Python-${DOWNLOAD_VERSION}
-  ./configure --enable-optimizations --prefix=/usr/local
+  ./configure --enable-optimizations --enable-shared --prefix=/usr/local
   make -j$(nproc)
   make altinstall
   ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
+  
+  # 确保动态库可以被找到
+  echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf
+  ldconfig
 fi
 
 # 确保 pip 可用

@@ -3,6 +3,15 @@ set -ex
 
 # CentOS 7 x86_64 环境设置脚本
 
+# 修复 CentOS 7 EOL 仓库问题
+echo "修复 CentOS 7 EOL 仓库问题..."
+sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
+sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+
+# 清理并重建 yum 缓存
+yum clean all
+yum makecache
+
 # 安装 EPEL 和基础工具
 yum install -y epel-release centos-release-scl
 yum update -y
@@ -56,16 +65,39 @@ else
   wget https://www.python.org/ftp/python/${DOWNLOAD_VERSION}/Python-${DOWNLOAD_VERSION}.tgz
   tar xzf Python-${DOWNLOAD_VERSION}.tgz
   cd Python-${DOWNLOAD_VERSION}
-  ./configure --enable-optimizations --prefix=/usr/local
+  ./configure --enable-optimizations --enable-shared --prefix=/usr/local
   make -j$(nproc)
   make altinstall
+  ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
+  
+  # 确保动态库可以被找到
+  echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf
+  ldconfig
   ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
 fi
 
 # 确保 pip 可用
 if ! command -v pip &> /dev/null; then
   echo "安装 pip..."
-  curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+  # 根据 Python 版本选择合适的 pip 安装脚本
+  case $PYTHON_VERSION in
+    3.6)
+      echo "使用 Python 3.6 专用的 pip 安装脚本..."
+      curl https://bootstrap.pypa.io/pip/3.6/get-pip.py -o get-pip.py
+      ;;
+    3.7)
+      echo "使用 Python 3.7 专用的 pip 安装脚本..."
+      curl https://bootstrap.pypa.io/pip/3.7/get-pip.py -o get-pip.py
+      ;;
+    3.8)
+      echo "使用 Python 3.8 专用的 pip 安装脚本..."
+      curl https://bootstrap.pypa.io/pip/3.8/get-pip.py -o get-pip.py
+      ;;
+    *)
+      echo "使用最新的 pip 安装脚本..."
+      curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+      ;;
+  esac
   python get-pip.py
   rm get-pip.py
 fi

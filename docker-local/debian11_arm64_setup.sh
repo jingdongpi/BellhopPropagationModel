@@ -31,10 +31,14 @@ elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
     wget https://www.python.org/ftp/python/3.10.12/Python-3.10.12.tgz
     tar xzf Python-3.10.12.tgz
     cd Python-3.10.12
-    ./configure --enable-optimizations --prefix=/usr/local
+    ./configure --enable-optimizations --enable-shared --prefix=/usr/local
     make -j$(nproc)
     make altinstall
     ln -sf /usr/local/bin/python3.10 /usr/local/bin/python
+    
+    # 确保动态库可以被找到
+    echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf
+    ldconfig
   fi
 else
   # 对于其他版本（3.8, 3.11, 3.12），从源码编译
@@ -63,14 +67,21 @@ else
   wget https://www.python.org/ftp/python/${DOWNLOAD_VERSION}/Python-${DOWNLOAD_VERSION}.tgz
   tar xzf Python-${DOWNLOAD_VERSION}.tgz
   cd Python-${DOWNLOAD_VERSION}
-  ./configure --enable-optimizations --prefix=/usr/local
+  ./configure --enable-optimizations --enable-shared --prefix=/usr/local
   make -j$(nproc)
   make altinstall
   ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
+  
+  # 确保动态库可以被找到
+  echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf
+  ldconfig
 fi
 
 # 确保 pip 可用
 if ! command -v pip &> /dev/null; then
+  echo "安装 pip..."
+  # 根据 Python 版本选择合适的 pip 安装脚本
+  case $PYTHON_VERSION in
     3.8)
       echo "使用 Python 3.8 专用的 pip 安装脚本..."
       curl https://bootstrap.pypa.io/pip/3.8/get-pip.py -o get-pip.py
@@ -79,6 +90,9 @@ if ! command -v pip &> /dev/null; then
       echo "使用最新的 pip 安装脚本..."
       curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
       ;;
+  esac
+  python get-pip.py
+  rm get-pip.py
 fi
 
 # 验证 Python 安装

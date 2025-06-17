@@ -95,7 +95,7 @@ jobs:
             if [[ "$first" == "false" ]]; then
               matrix_include+=","
             fi
-            matrix_include+="{\"platform\":\"debian11-arm64\",\"os\":\"ubuntu-22.04-arm\",\"python-version\":\"$version\",\"docker_image\":\"debian:11\",\"setup_script\":\"debian11_arm64_setup.sh\"}"
+            matrix_include+="{\"platform\":\"debian11-arm64\",\"os\":\"ubuntu-24.04-arm\",\"python-version\":\"$version\",\"docker_image\":\"debian:11\",\"setup_script\":\"debian11_arm64_setup.sh\"}"
             first=false
           done
         fi
@@ -125,11 +125,12 @@ jobs:
         python-version: ${{ matrix.python-version }}
 
     - name: Build Linux platforms with Docker
-      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-22.04-arm'
+      if: matrix.os == 'ubuntu-latest' || matrix.os == 'ubuntu-24.04-arm'
       run: |
         echo "构建平台: ${{ matrix.platform }}"
         echo "Docker镜像: ${{ matrix.docker_image }}"
         echo "Python版本: ${{ matrix.python-version }}"
+        echo "运行器: ${{ matrix.os }}"
         
         # 创建简化的构建 Dockerfile
         cat > Dockerfile.build << EOF
@@ -167,7 +168,7 @@ jobs:
             echo "=== 构建完成 ==="
         EOF
         
-        # 构建 Docker 镜像
+        # 构建 Docker 镜像（原生架构）
         docker build -f Dockerfile.build -t build-${{ matrix.platform }} .
         
         # 从容器中复制构建产物
