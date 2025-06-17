@@ -41,7 +41,7 @@ jobs:
             setup_script: ""
     
     # 只运行选中的平台
-    if: matrix.platform == github.event.inputs.test_platform
+    if: ${{ matrix.platform == github.event.inputs.test_platform }}
     
     steps:
     - name: Checkout repository
