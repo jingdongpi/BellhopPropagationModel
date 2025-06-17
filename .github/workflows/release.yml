@@ -14,16 +14,16 @@ on:
 jobs:
   release:
     name: Create Release
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5
       with:
-        python-version: '3.9'
+        python-version: '3.11'
         
     - name: Install dependencies
       run: |
@@ -75,58 +75,60 @@ jobs:
         fi
         
     - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ steps.get_version.outputs.version }}
-        release_name: BellhopPropagationModel ${{ steps.get_version.outputs.version }}
-        body: |
-          ## BellhopPropagationModel Release ${{ steps.get_version.outputs.version }}
-          
-          ### 📦 包含内容
-          - 🔧 编译后的可执行文件
-          - 📚 动态库文件
-          - 📖 头文件和文档
-          - 🔬 使用示例
-          
-          ### 🚀 使用方法
-          ```bash
-          # 解压发布包
-          tar -xzf BellhopPropagationModel-*.tar.gz
-          
-          # 运行程序
-          ./bin/BellhopPropagationModel input.json output.json
-          ```
-          
-          ### 📋 系统要求
-          - Linux 系统
-          - Python 3.8+
-          - NumPy, SciPy
-          
-          ---
-          自动构建于: ${{ github.sha }}
-        draft: false
-        prerelease: false
+      run: |
+        VERSION="${{ steps.get_version.outputs.version }}"
         
-    - name: Upload release package
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./BellhopPropagationModel-release.tar.gz
-        asset_name: BellhopPropagationModel-${{ steps.get_version.outputs.version }}-linux.tar.gz
-        asset_content_type: application/gzip
+        # 创建发布说明
+        cat > release_notes.md << 'EOF'
+        ## BellhopPropagationModel Release ${{ steps.get_version.outputs.version }}
         
-    - name: Upload delivery package (if exists)
-      if: hashFiles('**/BellhopPropagationModel_*_Delivery*.tar.gz') != ''
-      uses: actions/upload-release-asset@v1
+        ### 📦 包含内容
+        - 🔧 编译后的可执行文件
+        - 📚 动态库文件  
+        - 📖 头文件和文档
+        - 🔬 使用示例
+        
+        ### 🚀 使用方法
+        ```bash
+        # 解压发布包
+        tar -xzf BellhopPropagationModel-*.tar.gz
+        
+        # 运行程序
+        ./bin/BellhopPropagationModel input.json output.json
+        ```
+        
+        ### 📋 系统要求
+        - Linux 系统
+        - Python 3.9+
+        - NumPy, SciPy
+        
+        ---
+        自动构建于: ${{ github.sha }}
+        EOF
+        
+        # 创建发布
+        gh release create "$VERSION" \
+          --title "BellhopPropagationModel $VERSION" \
+          --notes-file release_notes.md \
+          --target ${{ github.sha }}
+          
+    - name: Upload release assets
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./BellhopPropagationModel_*_Delivery*.tar.gz
-        asset_name: BellhopPropagationModel-${{ steps.get_version.outputs.version }}-delivery.tar.gz
-        asset_content_type: application/gzip
+      run: |
+        VERSION="${{ steps.get_version.outputs.version }}"
+        
+        # 上传主发布包
+        if [ -f "./BellhopPropagationModel-release.tar.gz" ]; then
+          gh release upload "$VERSION" \
+            "./BellhopPropagationModel-release.tar.gz#BellhopPropagationModel-$VERSION-linux.tar.gz"
+        fi
+        
+        # 上传Delivery包（如果存在）
+        DELIVERY_FILE=$(find . -name "BellhopPropagationModel_*_Delivery*.tar.gz" | head -1)
+        if [ -n "$DELIVERY_FILE" ] && [ -f "$DELIVERY_FILE" ]; then
+          gh release upload "$VERSION" \
+            "$DELIVERY_FILE#BellhopPropagationModel-$VERSION-delivery.tar.gz"
+        fi
