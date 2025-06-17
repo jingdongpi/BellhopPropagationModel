@@ -1,0 +1,459 @@
+name: Multi-Platform Docker Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      platforms:
+        description: '选择构建平台'
+        required: true
+        default: 'all'
+        type: choice
+        options:
+          - 'all'
+          - 'centos7-x86_64'
+          - 'win11-x86_64'
+          - 'debian11-arm64'
+          - 'centos8-arm64'
+      python_version:
+        description: 'Python版本'
+        required: true
+        default: '3.8'
+        type: choice
+        options:
+          - '3.8'
+          - '3.9'
+          - '3.10'
+          - '3.11'
+
+jobs:
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - name: Generate build matrix
+      id: set-matrix
+      run: |
+        SELECTED_PLATFORMS="${{ github.event.inputs.platforms }}"
+        
+        echo "选择的平台: $SELECTED_PLATFORMS"
+        
+        # 定义所有支持的平台配置
+        matrix_include="["
+        first=true
+        
+        # CentOS 7 x86_64
+        if [[ "$SELECTED_PLATFORMS" == "all" || "$SELECTED_PLATFORMS" == "centos7-x86_64" ]]; then
+          if [[ "$first" == "false" ]]; then matrix_include+=","; fi
+          matrix_include+='{
+            "platform": "centos7-x86_64",
+            "runner": "ubuntu-latest",
+            "docker_image": "centos:7",
+            "arch": "x86_64",
+            "glibc": "2.17",
+            "setup_script": "centos7_setup.sh"
+          }'
+          first=false
+        fi
+        
+        # Windows 11 x86_64
+        if [[ "$SELECTED_PLATFORMS" == "all" || "$SELECTED_PLATFORMS" == "win11-x86_64" ]]; then
+          if [[ "$first" == "false" ]]; then matrix_include+=","; fi
+          matrix_include+='{
+            "platform": "win11-x86_64",
+            "runner": "windows-2022",
+            "docker_image": "mcr.microsoft.com/windows/servercore:ltsc2022",
+            "arch": "x86_64",
+            "setup_script": "win11_setup.ps1"
+          }'
+          first=false
+        fi
+        
+        # Debian 11 ARM64
+        if [[ "$SELECTED_PLATFORMS" == "all" || "$SELECTED_PLATFORMS" == "debian11-arm64" ]]; then
+          if [[ "$first" == "false" ]]; then matrix_include+=","; fi
+          matrix_include+='{
+            "platform": "debian11-arm64",
+            "runner": "ubuntu-latest",
+            "docker_image": "arm64v8/debian:11",
+            "arch": "arm64",
+            "glibc": "2.31",
+            "setup_script": "debian11_setup.sh"
+          }'
+          first=false
+        fi
+        
+        # CentOS 8 ARM64
+        if [[ "$SELECTED_PLATFORMS" == "all" || "$SELECTED_PLATFORMS" == "centos8-arm64" ]]; then
+          if [[ "$first" == "false" ]]; then matrix_include+=","; fi
+          matrix_include+='{
+            "platform": "centos8-arm64",
+            "runner": "ubuntu-latest", 
+            "docker_image": "arm64v8/centos:8",
+            "arch": "arm64",
+            "glibc": "2.28",
+            "setup_script": "centos8_setup.sh"
+          }'
+          first=false
+        fi
+        
+        matrix_include+="]"
+        matrix_json="{\"include\":$matrix_include}"
+        
+        echo "生成的构建矩阵:"
+        echo "$matrix_json" | jq '.'
+        
+        echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+
+  multi-platform-build:
+    needs: generate-matrix
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix: ${{fromJson(needs.generate-matrix.outputs.matrix)}}
+    
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU for ARM emulation
+      if: matrix.arch == 'arm64'
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64
+
+    - name: Set up Docker Buildx
+      if: matrix.runner == 'ubuntu-latest'
+      uses: docker/setup-buildx-action@v3
+
+    - name: Create build scripts
+      run: |
+        mkdir -p docker-build
+        
+        # CentOS 7 x86_64 setup script
+        cat > docker-build/centos7_setup.sh << 'EOF'
+        #!/bin/bash
+        set -ex
+        
+        # 安装 EPEL 和基础工具
+        yum install -y epel-release centos-release-scl
+        yum update -y
+        
+        # 安装编译工具
+        yum install -y devtoolset-7-gcc devtoolset-7-gcc-c++ devtoolset-7-gcc-gfortran
+        yum install -y cmake3 make git wget
+        
+        # 创建符号链接
+        ln -sf /usr/bin/cmake3 /usr/bin/cmake
+        
+        # 激活 devtoolset-7
+        source /opt/rh/devtoolset-7/enable
+        echo 'source /opt/rh/devtoolset-7/enable' >> ~/.bashrc
+        
+        # 安装 Python
+        PYTHON_VERSION=$1
+        if [[ "$PYTHON_VERSION" == "3.8" ]]; then
+          yum install -y python38 python38-devel python38-pip
+          ln -sf /usr/bin/python3.8 /usr/local/bin/python
+        elif [[ "$PYTHON_VERSION" == "3.9" ]]; then
+          yum install -y python39 python39-devel python39-pip
+          ln -sf /usr/bin/python3.9 /usr/local/bin/python
+        else
+          # 从源码编译其他版本
+          yum install -y openssl-devel libffi-devel zlib-devel
+          cd /tmp
+          wget https://www.python.org/ftp/python/${PYTHON_VERSION}.0/Python-${PYTHON_VERSION}.0.tgz
+          tar xzf Python-${PYTHON_VERSION}.0.tgz
+          cd Python-${PYTHON_VERSION}.0
+          ./configure --enable-optimizations --prefix=/usr/local
+          make -j$(nproc)
+          make altinstall
+          ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
+        fi
+        
+        # 安装 Python 依赖
+        python -m pip install --upgrade pip
+        python -m pip install nuitka wheel setuptools
+        
+        # 安装 NumPy 和 SciPy（根据 Python 版本）
+        if [[ "$PYTHON_VERSION" == "3.8" ]]; then
+          python -m pip install "numpy>=1.20.0,<2.0.0" scipy
+        else
+          python -m pip install "numpy>=2.0.0" scipy
+        fi
+        EOF
+        
+        # Debian 11 ARM64 setup script
+        cat > docker-build/debian11_setup.sh << 'EOF'
+        #!/bin/bash
+        set -ex
+        
+        # 更新包列表
+        apt-get update
+        
+        # 安装编译工具
+        apt-get install -y build-essential cmake gfortran git wget
+        
+        # 安装 Python
+        PYTHON_VERSION=$1
+        apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip
+        
+        # 创建符号链接
+        ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python
+        
+        # 安装 Python 依赖
+        python -m pip install --upgrade pip
+        python -m pip install nuitka wheel setuptools
+        
+        # 安装 NumPy 和 SciPy
+        if [[ "$PYTHON_VERSION" == "3.8" ]]; then
+          python -m pip install "numpy>=1.20.0,<2.0.0" scipy
+        else
+          python -m pip install "numpy>=2.0.0" scipy
+        fi
+        EOF
+        
+        # CentOS 8 ARM64 setup script  
+        cat > docker-build/centos8_setup.sh << 'EOF'
+        #!/bin/bash
+        set -ex
+        
+        # 修复 CentOS 8 仓库问题
+        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
+        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
+        
+        # 安装 EPEL 和编译工具
+        yum install -y epel-release
+        yum groupinstall -y "Development Tools"
+        yum install -y cmake gcc-gfortran git wget
+        
+        # 安装 Python
+        PYTHON_VERSION=$1
+        yum install -y python${PYTHON_VERSION/./} python${PYTHON_VERSION/./}-devel python3-pip
+        ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python
+        
+        # 安装 Python 依赖
+        python -m pip install --upgrade pip
+        python -m pip install nuitka wheel setuptools
+        
+        # 安装 NumPy 和 SciPy
+        if [[ "$PYTHON_VERSION" == "3.8" ]]; then
+          python -m pip install "numpy>=1.20.0,<2.0.0" scipy
+        else
+          python -m pip install "numpy>=2.0.0" scipy
+        fi
+        EOF
+
+    - name: Create Windows setup script
+      if: matrix.platform == 'win11-x86_64'
+      run: |
+        cat > docker-build/win11_setup.ps1 << 'EOF'
+        # Windows 11 Docker 环境设置脚本
+        
+        param(
+            [string]$PythonVersion = "3.8"
+        )
+        
+        Write-Host "=== 设置 Windows 11 构建环境 ==="
+        
+        # 安装 Chocolatey
+        Set-ExecutionPolicy Bypass -Scope Process -Force
+        [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072
+        iex ((New-Object System.Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
+        
+        # 安装构建工具
+        choco install -y cmake git mingw
+        choco install -y python --version=$PythonVersion
+        
+        # 刷新环境变量
+        refreshenv
+        
+        # 安装 Python 依赖
+        python -m pip install --upgrade pip
+        python -m pip install nuitka wheel setuptools
+        
+        # 安装 NumPy 和 SciPy
+        if ($PythonVersion -eq "3.8") {
+            python -m pip install "numpy>=1.20.0,<2.0.0" scipy
+        } else {
+            python -m pip install "numpy>=2.0.0" scipy
+        }
+        
+        Write-Host "=== Windows 环境设置完成 ==="
+        EOF
+      shell: bash
+
+    - name: Build for Linux platforms
+      if: matrix.runner == 'ubuntu-latest'
+      run: |
+        cat > Dockerfile.build << EOF
+        FROM ${{ matrix.docker_image }}
+        
+        # 复制设置脚本
+        COPY docker-build/${{ matrix.setup_script }} /setup.sh
+        RUN chmod +x /setup.sh
+        
+        # 运行设置脚本
+        RUN /setup.sh ${{ github.event.inputs.python_version }}
+        
+        WORKDIR /workspace
+        EOF
+        
+        # 构建 Docker 镜像
+        docker buildx build --platform linux/${{ matrix.arch }} -f Dockerfile.build -t bellhop-builder:${{ matrix.platform }} .
+        
+        # 在容器中构建项目
+        docker run --platform linux/${{ matrix.arch }} --rm -v $(pwd):/workspace bellhop-builder:${{ matrix.platform }} bash -c "
+          set -ex
+          
+          # 显示系统信息
+          echo '=== 系统信息 ==='
+          uname -a
+          cat /etc/os-release || cat /etc/centos-release || echo 'Unknown OS'
+          
+          echo '=== GLIBC 版本 ==='
+          ldd --version | head -1
+          
+          echo '=== Python 信息 ==='
+          python --version
+          python -c 'import sys; print(f\"Python executable: {sys.executable}\")'
+          python -c 'import platform; print(f\"Architecture: {platform.machine()}\")'
+          
+          # 激活编译环境（CentOS 7 需要）
+          if [ -f /opt/rh/devtoolset-7/enable ]; then
+            source /opt/rh/devtoolset-7/enable
+          fi
+          
+          # 创建构建目录
+          mkdir -p build
+          cd build
+          
+          # 配置 CMake
+          PYTHON_EXECUTABLE=\$(which python)
+          echo \"使用 Python: \$PYTHON_EXECUTABLE\"
+          
+          cmake .. \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPYTHON_EXECUTABLE=\$PYTHON_EXECUTABLE \
+            -DPython3_EXECUTABLE=\$PYTHON_EXECUTABLE \
+            -DCMAKE_EXE_LINKER_FLAGS='-static-libgcc -static-libstdc++' \
+            -DCMAKE_SHARED_LINKER_FLAGS='-static-libgcc -static-libstdc++' \
+            -DBUILD_EXECUTABLE=ON \
+            -DBUILD_SHARED_LIBS=ON
+          
+          # 编译
+          make -j\$(nproc) VERBOSE=1
+          
+          # 返回根目录编译 Python 模块
+          cd ..
+          if [ -f scripts/compile_nuitka_cross_platform.py ]; then
+            python scripts/compile_nuitka_cross_platform.py
+          fi
+          
+          # 检查构建结果
+          echo '=== 构建产物检查 ==='
+          ls -la bin/ lib/ || true
+          
+          if [ -f bin/BellhopPropagationModel ]; then
+            echo '✅ 可执行文件已生成'
+            file bin/BellhopPropagationModel
+            echo '依赖检查:'
+            ldd bin/BellhopPropagationModel || echo '静态链接或无外部依赖'
+          fi
+          
+          if [ -f lib/libBellhopPropagationModel.so ]; then
+            echo '✅ 动态库已生成'
+            file lib/libBellhopPropagationModel.so
+            echo '依赖检查:'
+            ldd lib/libBellhopPropagationModel.so || echo '静态链接或无外部依赖'
+          fi
+          
+          # 检查 Python 模块
+          find lib -name '*.so' -type f | head -5 | while read module; do
+            echo \"检查 Python 模块: \$module\"
+            file \"\$module\"
+          done
+        "
+
+    - name: Build for Windows platform
+      if: matrix.platform == 'win11-x86_64'
+      run: |
+        # Windows 构建使用本地环境
+        .\docker-build\win11_setup.ps1 -PythonVersion ${{ github.event.inputs.python_version }}
+        
+        # 显示系统信息
+        Write-Host "=== 系统信息 ==="
+        Get-ComputerInfo | Select-Object WindowsProductName, TotalPhysicalMemory
+        
+        Write-Host "=== Python 信息 ==="
+        python --version
+        python -c "import sys; print(f'Python executable: {sys.executable}')"
+        python -c "import platform; print(f'Architecture: {platform.machine()}')"
+        
+        # 创建构建目录
+        mkdir build -ErrorAction SilentlyContinue
+        cd build
+        
+        # 配置 CMake
+        $pythonExe = (Get-Command python).Source
+        Write-Host "使用 Python: $pythonExe"
+        
+        cmake .. `
+          -G "MinGW Makefiles" `
+          -DCMAKE_BUILD_TYPE=Release `
+          -DBUILD_EXECUTABLE=ON `
+          -DBUILD_SHARED_LIBS=ON `
+          -DPython3_EXECUTABLE="$pythonExe"
+        
+        # 编译
+        mingw32-make -j4
+        
+        # 编译 Python 模块
+        cd ..
+        if (Test-Path "scripts/compile_nuitka_cross_platform.py") {
+          python scripts/compile_nuitka_cross_platform.py
+        }
+        
+        # 检查构建结果
+        Write-Host "=== 构建产物检查 ==="
+        Get-ChildItem bin, lib -ErrorAction SilentlyContinue
+      shell: pwsh
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: bellhop-${{ matrix.platform }}-python${{ github.event.inputs.python_version }}
+        path: |
+          bin/
+          lib/
+          include/
+        retention-days: 30
+
+    - name: Create build info
+      run: |
+        cat > build-info.txt << EOF
+        构建信息:
+        ==========================================
+        平台: ${{ matrix.platform }}
+        架构: ${{ matrix.arch }}
+        Docker镜像: ${{ matrix.docker_image }}
+        GLIBC版本: ${{ matrix.glibc || 'N/A' }}
+        Python版本: ${{ github.event.inputs.python_version }}
+        构建时间: $(date)
+        运行环境: ${{ matrix.runner }}
+        
+        兼容性说明:
+        - CentOS 7 x86_64: 支持 GLIBC 2.17+ 的 Linux 系统
+        - Windows 11 x86_64: 支持 Windows 10+ 64位系统
+        - Debian 11 ARM64: 支持 GLIBC 2.31+ 的 ARM64 Linux 系统
+        - CentOS 8 ARM64: 支持 GLIBC 2.28+ 的 ARM64 Linux 系统
+        
+        静态链接: libgcc, libstdc++ (Linux平台)
+        EOF
+      shell: bash
+
+    - name: Upload build info
+      uses: actions/upload-artifact@v4
+      with:
+        name: build-info-${{ matrix.platform }}
+        path: build-info.txt
