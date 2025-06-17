@@ -146,6 +146,7 @@ PYTHON_VERSION=${1:-3.8}
 
 echo "安装 Python $PYTHON_VERSION..."
 
+# 对于CentOS 7，优先使用预编译版本或者更加稳定的编译配置
 if [[ "$PYTHON_VERSION" == "3.8" ]]; then
   yum install -y python38 python38-devel python38-pip || (
     echo "Python 3.8 yum 安装失败，尝试其他方法..."
@@ -181,8 +182,19 @@ elif [[ "$PYTHON_VERSION" == "3.9" ]]; then
     wget https://www.python.org/ftp/python/3.9.18/Python-3.9.18.tgz
     tar xzf Python-3.9.18.tgz
     cd Python-3.9.18
-    ./configure --enable-optimizations --enable-shared --prefix=/usr/local
-    make -j$(nproc)
+    
+    # 确保使用DevToolSet 7编译器
+    if [ -f /opt/rh/devtoolset-7/enable ]; then
+      source /opt/rh/devtoolset-7/enable
+      echo "✓ 使用DevToolSet 7编译器编译Python"
+    fi
+    
+    # 使用较为保守的编译选项
+    CFLAGS="-O1" CXXFLAGS="-O1" ./configure --enable-shared --prefix=/usr/local \
+      --with-ensurepip=install \
+      --enable-loadable-sqlite-extensions
+    
+    make -j2 || make -j1
     make altinstall
     
     # 确保动态库可以被找到
@@ -194,6 +206,68 @@ elif [[ "$PYTHON_VERSION" == "3.9" ]]; then
       ln -sf /usr/local/bin/python3.9 /usr/local/bin/python
       echo "✓ 创建符号链接: /usr/local/bin/python3.9 -> /usr/local/bin/python"
     fi
+  fi
+elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
+  # 对于Python 3.10，由于编译问题，使用已知的稳定配置
+  echo "为Python 3.10使用特殊的编译配置以避免CentOS 7兼容性问题..."
+  
+  # 安装编译依赖
+  yum install -y openssl-devel libffi-devel zlib-devel bzip2-devel \
+                 readline-devel sqlite-devel xz-devel tk-devel \
+                 gdbm-devel libuuid-devel ncurses-devel
+  
+  cd /tmp
+  
+  # 下载Python 3.10的较老版本，兼容性更好
+  DOWNLOAD_VERSION="3.10.0"
+  echo "下载Python $DOWNLOAD_VERSION (较老版本以提高兼容性)..."
+  
+  wget "https://www.python.org/ftp/python/${DOWNLOAD_VERSION}/Python-${DOWNLOAD_VERSION}.tgz" || {
+    echo "官方源下载失败，尝试备用源..."
+    wget "https://github.com/python/cpython/archive/v${DOWNLOAD_VERSION}.tar.gz" -O "Python-${DOWNLOAD_VERSION}.tgz" || {
+      echo "所有源都失败，使用本地可用的Python版本..."
+      yum install -y python3 python3-devel python3-pip
+      ln -sf $(which python3) /usr/local/bin/python
+      return 0
+    }
+  }
+  
+  tar xzf "Python-${DOWNLOAD_VERSION}.tgz"
+  cd "Python-${DOWNLOAD_VERSION}" || cd "cpython-${DOWNLOAD_VERSION}"
+  
+  # 确保使用DevToolSet 7编译器
+  if [ -f /opt/rh/devtoolset-7/enable ]; then
+    source /opt/rh/devtoolset-7/enable
+    echo "✓ 使用DevToolSet 7编译器编译Python"
+  fi
+  
+  # 使用最保守的编译选项，避免编译器优化问题
+  echo "配置Python编译选项（保守模式）..."
+  CFLAGS="-O0 -g" CXXFLAGS="-O0 -g" ./configure \
+    --enable-shared \
+    --prefix=/usr/local \
+    --with-ensurepip=install \
+    --enable-loadable-sqlite-extensions \
+    --disable-test-modules \
+    --without-lto
+  
+  echo "开始编译Python 3.10（使用保守配置）..."
+  if ! make -j1; then
+    echo "编译失败，尝试清理后重新编译..."
+    make clean
+    make -j1 EXTRA_CFLAGS="-fno-semantic-interposition"
+  fi
+  
+  make altinstall
+  
+  # 确保动态库可以被找到
+  echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf
+  ldconfig
+  
+  # 创建python符号链接
+  if [ -f /usr/local/bin/python3.10 ]; then
+    ln -sf /usr/local/bin/python3.10 /usr/local/bin/python
+    echo "✓ 创建符号链接: /usr/local/bin/python3.10 -> /usr/local/bin/python"
   fi
 else
   # 从源码编译其他版本 (3.10, 3.11, 3.12)
@@ -222,8 +296,35 @@ else
   wget https://www.python.org/ftp/python/${DOWNLOAD_VERSION}/Python-${DOWNLOAD_VERSION}.tgz
   tar xzf Python-${DOWNLOAD_VERSION}.tgz
   cd Python-${DOWNLOAD_VERSION}
-  ./configure --enable-optimizations --enable-shared --prefix=/usr/local
-  make -j$(nproc)
+  
+  # 确保使用DevToolSet 7编译器（如果可用）
+  if [ -f /opt/rh/devtoolset-7/enable ]; then
+    source /opt/rh/devtoolset-7/enable
+    echo "✓ 使用DevToolSet 7编译器编译Python"
+  fi
+  
+  # 对于Python 3.10+，避免使用--enable-optimizations，因为CentOS 7的编译器可能不支持
+  # 同时设置较小的编译优化级别避免编译问题
+  if [[ "$PYTHON_VERSION" == "3.10"* ]] || [[ "$PYTHON_VERSION" == "3.11"* ]] || [[ "$PYTHON_VERSION" == "3.12"* ]]; then
+    echo "编译Python $PYTHON_VERSION (禁用优化以避免编译器兼容性问题)..."
+    CFLAGS="-O1" CXXFLAGS="-O1" ./configure --enable-shared --prefix=/usr/local \
+      --with-ensurepip=install \
+      --enable-loadable-sqlite-extensions
+  else
+    echo "编译Python $PYTHON_VERSION (启用优化)..."
+    ./configure --enable-optimizations --enable-shared --prefix=/usr/local \
+      --with-ensurepip=install \
+      --enable-loadable-sqlite-extensions
+  fi
+  
+  # 使用较少的并行数避免内存问题，并添加错误重试
+  echo "开始编译Python，这可能需要几分钟..."
+  if ! make -j2; then
+    echo "并行编译失败，尝试单线程编译..."
+    make clean
+    make -j1
+  fi
+  
   make altinstall
   
   # 确保动态库可以被找到
