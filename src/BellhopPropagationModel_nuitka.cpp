@@ -9,9 +9,14 @@
 #include <string>
 #include <iostream>
 #include <filesystem>
-#include <dlfcn.h>
 #include <vector>
 #include <cstdlib>
+
+// 条件包含动态库加载头文件
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__MINGW32__) && !defined(__MINGW64__)
+#include <dlfcn.h>
+#endif
+
 #include "BellhopPropagationModelInterface.h"
 
 // 全局Python解释器状态
@@ -138,7 +143,8 @@ bool initialize_python_environment() {
     }
     
     try {
-        // 预加载Python共享库以解决符号链接问题
+        // 预加载Python共享库以解决符号链接问题（仅在Linux/Unix系统）
+#if !defined(_WIN32) && !defined(_WIN64) && !defined(__MINGW32__) && !defined(__MINGW64__)
         // 尝试多个可能的Python库版本
         void* python_lib = nullptr;
         std::vector<std::string> python_libs = {
@@ -163,6 +169,7 @@ bool initialize_python_environment() {
         if (!python_lib) {
             std::cerr << "⚠️  未找到兼容的Python共享库，尝试使用系统默认..." << std::endl;
         }
+#endif
         
         // 初始化Python解释器
         if (!Py_IsInitialized()) {
