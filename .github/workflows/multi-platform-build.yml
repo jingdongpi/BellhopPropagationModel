@@ -251,6 +251,8 @@ jobs:
                 continue
               }
             }
+          }
+        }
         
         # 确保切换回项目根目录
         Set-Location $env:GITHUB_WORKSPACE
