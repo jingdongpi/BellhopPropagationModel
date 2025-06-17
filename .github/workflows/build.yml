@@ -13,16 +13,11 @@ on:
           - 'all'
           - 'linux'
           - 'windows'
-      python_version:
-        description: '选择Python版本'
+      python_versions:
+        description: '选择Python版本 (逗号分隔)'
         required: true
-        default: 'all'
-        type: choice
-        options:
-          - 'all'
-          - '3.8'
-          - '3.10'
-          - '3.12'
+        default: '3.8,3.10,3.12'
+        type: string
       architecture:
         description: '选择架构'
         required: true
@@ -31,67 +26,100 @@ on:
         options:
           - 'x86_64'
           - 'x86'
+          - 'all'
 
 jobs:
+  generate-matrix:
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+    - name: Generate build matrix
+      id: set-matrix
+      run: |
+        # 获取手动触发的输入参数
+        PLATFORM="${{ github.event.inputs.platform }}"
+        PYTHON_VERSIONS="${{ github.event.inputs.python_versions }}"
+        ARCHITECTURE="${{ github.event.inputs.architecture }}"
+        
+        echo "构建配置:"
+        echo "平台: $PLATFORM"
+        echo "Python 版本: $PYTHON_VERSIONS"
+        echo "架构: $ARCHITECTURE"
+        
+        # 生成矩阵 JSON
+        matrix_include="["
+        first=true
+        
+        # 将 Python 版本字符串转换为数组
+        IFS=',' read -ra VERSIONS <<< "$PYTHON_VERSIONS"
+        
+        # 确定需要构建的平台
+        platforms=()
+        if [[ "$PLATFORM" == "all" ]]; then
+          platforms=("linux" "windows")
+        else
+          platforms=("$PLATFORM")
+        fi
+        
+        # 确定需要构建的架构
+        architectures=()
+        if [[ "$ARCHITECTURE" == "all" ]]; then
+          architectures=("x86_64" "x86")
+        else
+          architectures=("$ARCHITECTURE")
+        fi
+        
+        # 为每个平台、版本、架构组合生成矩阵项
+        for platform in "${platforms[@]}"; do
+          for arch in "${architectures[@]}"; do
+            # Linux 只支持 x86_64
+            if [[ "$platform" == "linux" && "$arch" == "x86" ]]; then
+              continue
+            fi
+            
+            for version in "${VERSIONS[@]}"; do
+              version=$(echo "$version" | xargs)  # 去除空格
+              
+              if [[ "$first" == "false" ]]; then
+                matrix_include+=","
+              fi
+              
+              # 确定操作系统
+              if [[ "$platform" == "linux" ]]; then
+                os="ubuntu-22.04"
+              else
+                os="windows-2019"
+              fi
+              
+              matrix_include+="{\"os\":\"$os\",\"python-version\":\"$version\",\"platform\":\"$platform\",\"arch\":\"$arch\"}"
+              first=false
+            done
+          done
+        done
+        
+        matrix_include+="]"
+        matrix_json="{\"include\":$matrix_include}"
+        
+        echo "生成的矩阵:"
+        echo "$matrix_json" | jq '.'
+        
+        echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+
   build:
     name: Build on ${{ matrix.platform }}-${{ matrix.arch }} (Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    # 只有当满足条件时才运行
-    if: >
-      (inputs.platform == 'all' || inputs.platform == matrix.platform) &&
-      (inputs.python_version == 'all' || inputs.python_version == matrix.python-version) &&
-      (inputs.architecture == matrix.arch)
+    needs: generate-matrix
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          # Windows x86-64 (MinGW32)
-          - os: windows-2019
-            python-version: '3.8'
-            platform: windows
-            arch: x86_64
-          - os: windows-2019
-            python-version: '3.10'
-            platform: windows
-            arch: x86_64
-          - os: windows-2019
-            python-version: '3.12'
-            platform: windows
-            arch: x86_64
-          
-          # Windows x86 (MinGW32)
-          - os: windows-2019
-            python-version: '3.8'
-            platform: windows
-            arch: x86
-          - os: windows-2019
-            python-version: '3.10'
-            platform: windows
-            arch: x86
-          - os: windows-2019
-            python-version: '3.12'
-            platform: windows
-            arch: x86
-          
-          # Linux x86-64
-          - os: ubuntu-22.04
-            python-version: '3.8'
-            platform: linux
-            arch: x86_64
-          - os: ubuntu-22.04
-            python-version: '3.10'
-            platform: linux
-            arch: x86_64
-          - os: ubuntu-22.04
-            python-version: '3.12'
-            platform: linux
-            arch: x86_64
+      matrix: ${{fromJson(needs.generate-matrix.outputs.matrix)}}
         
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
       
     - name: Set up Python ${{ matrix.python-version }}
+      
       uses: actions/setup-python@v5
       with:
         python-version: ${{ matrix.python-version }}
@@ -142,6 +170,7 @@ jobs:
       shell: pwsh
           
     - name: Install Python dependencies
+      
       run: |
         python -m pip install --upgrade pip
         pip install -r requirements.txt
