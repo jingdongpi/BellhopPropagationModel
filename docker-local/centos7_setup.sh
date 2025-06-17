@@ -9,70 +9,98 @@ echo "修复 CentOS 7 EOL 仓库问题..."
 # 备份原始仓库文件
 cp -r /etc/yum.repos.d /etc/yum.repos.d.backup || true
 
-# 修复主要 CentOS 仓库
-sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*.repo
-sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*.repo
+# 禁用所有原有仓库（避免EOL错误）
+for repo in /etc/yum.repos.d/CentOS-*.repo; do
+    if [ -f "$repo" ]; then
+        sed -i 's/enabled=1/enabled=0/g' "$repo"
+        echo "禁用仓库: $repo"
+    fi
+done
 
-# 修复 SCL 仓库问题
-if [ -f /etc/yum.repos.d/CentOS-SCLo-scl.repo ]; then
-    sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-SCLo-scl*.repo
-    sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-SCLo-scl*.repo
-fi
+# 清理可能存在的SCL配置
+rm -f /etc/yum.repos.d/CentOS-SCLo-scl*.repo || true
 
-# 创建或更新 vault.centos.org 仓库配置
-cat > /etc/yum.repos.d/CentOS-Vault.repo << 'EOF'
+# 创建国内镜像源配置（使用阿里云镜像）
+cat > /etc/yum.repos.d/CentOS-AliYun.repo << 'EOF'
 [base]
-name=CentOS-7 - Base
-baseurl=http://vault.centos.org/7.9.2009/os/x86_64/
+name=CentOS-7 - Base - mirrors.aliyun.com
+failovermethod=priority
+baseurl=http://mirrors.aliyun.com/centos/7/os/x86_64/
+        http://mirrors.cloud.aliyuncs.com/centos/7/os/x86_64/
+        http://vault.centos.org/7.9.2009/os/x86_64/
 gpgcheck=1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-enabled=1
+gpgkey=http://mirrors.aliyun.com/centos/RPM-GPG-KEY-CentOS-7
 
 [updates]
-name=CentOS-7 - Updates
-baseurl=http://vault.centos.org/7.9.2009/updates/x86_64/
+name=CentOS-7 - Updates - mirrors.aliyun.com
+failovermethod=priority
+baseurl=http://mirrors.aliyun.com/centos/7/updates/x86_64/
+        http://mirrors.cloud.aliyuncs.com/centos/7/updates/x86_64/
+        http://vault.centos.org/7.9.2009/updates/x86_64/
 gpgcheck=1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-enabled=1
+gpgkey=http://mirrors.aliyun.com/centos/RPM-GPG-KEY-CentOS-7
 
 [extras]
-name=CentOS-7 - Extras
-baseurl=http://vault.centos.org/7.9.2009/extras/x86_64/
+name=CentOS-7 - Extras - mirrors.aliyun.com
+failovermethod=priority
+baseurl=http://mirrors.aliyun.com/centos/7/extras/x86_64/
+        http://mirrors.cloud.aliyuncs.com/centos/7/extras/x86_64/
+        http://vault.centos.org/7.9.2009/extras/x86_64/
 gpgcheck=1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
-enabled=1
+gpgkey=http://mirrors.aliyun.com/centos/RPM-GPG-KEY-CentOS-7
 
 [centosplus]
-name=CentOS-7 - Plus
-baseurl=http://vault.centos.org/7.9.2009/centosplus/x86_64/
+name=CentOS-7 - Plus - mirrors.aliyun.com
+failovermethod=priority
+baseurl=http://mirrors.aliyun.com/centos/7/centosplus/x86_64/
+        http://mirrors.cloud.aliyuncs.com/centos/7/centosplus/x86_64/
+        http://vault.centos.org/7.9.2009/centosplus/x86_64/
 gpgcheck=1
 enabled=0
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-7
+gpgkey=http://mirrors.aliyun.com/centos/RPM-GPG-KEY-CentOS-7
 
 [sclo-rh]
 name=CentOS-7 - SCLo rh
-baseurl=http://vault.centos.org/7.9.2009/sclo/x86_64/rh/
+failovermethod=priority
+baseurl=http://mirrors.aliyun.com/centos/7/sclo/x86_64/rh/
+        http://vault.centos.org/7.9.2009/sclo/x86_64/rh/
 gpgcheck=1
 enabled=1
-gpgkey=file:///etc/pki/rpm-gpg/RPM-GPG-KEY-CentOS-SIG-SCLo
+gpgkey=http://mirrors.aliyun.com/centos/RPM-GPG-KEY-CentOS-SIG-SCLo
+
+[sclo-sclo]
+name=CentOS-7 - SCLo sclo
+failovermethod=priority
+baseurl=http://mirrors.aliyun.com/centos/7/sclo/x86_64/sclo/
+        http://vault.centos.org/7.9.2009/sclo/x86_64/sclo/
+gpgcheck=1
+enabled=1
+gpgkey=http://mirrors.aliyun.com/centos/RPM-GPG-KEY-CentOS-SIG-SCLo
+
+[epel]
+name=Extra Packages for Enterprise Linux 7 - mirrors.aliyun.com
+failovermethod=priority
+baseurl=http://mirrors.aliyun.com/epel/7/x86_64/
+        http://mirrors.cloud.aliyuncs.com/epel/7/x86_64/
+        https://dl.fedoraproject.org/pub/epel/7/x86_64/
+enabled=1
+gpgcheck=1
+gpgkey=http://mirrors.aliyun.com/epel/RPM-GPG-KEY-EPEL-7
 EOF
 
 # 清理并重建 yum 缓存
+echo "重建yum缓存..."
 yum clean all || true
 yum makecache fast || yum makecache || true
 
-# 安装 EPEL （使用备用方法）
-echo "安装 EPEL..."
-yum install -y epel-release || (
-    echo "EPEL 安装失败，使用 rpm 直接安装..."
-    rpm -Uvh https://dl.fedoraproject.org/pub/epel/epel-release-latest-7.noarch.rpm || true
-)
+# 跳过EPEL独立安装（已在镜像配置中包含）
+echo "✓ EPEL已在镜像源配置中包含"
 
-# 安装 SCL
+# 安装 SCL （通过新配置的镜像源）
 echo "安装 centos-release-scl..."
 yum install -y centos-release-scl || (
-    echo "SCL 安装失败，尝试手动配置..."
-    rpm -Uvh http://vault.centos.org/7.9.2009/extras/x86_64/Packages/centos-release-scl-2-3.el7.centos.noarch.rpm || true
+    echo "SCL 安装失败，但SCL仓库已在镜像配置中，继续..."
+    true
 )
 
 # 系统更新（容错处理）
@@ -301,5 +329,10 @@ if command -v pip >/dev/null 2>&1 || python -m pip --version >/dev/null 2>&1; th
 else
     echo "❌ pip 未安装"
 fi
+
+# 测试仓库配置
+echo "=== 测试仓库配置 ==="
+yum repolist enabled | head -10
+echo "可用的仓库数量: $(yum repolist enabled | grep -c "repolist:")"
 
 echo "=== CentOS 7 环境设置完成 ==="
