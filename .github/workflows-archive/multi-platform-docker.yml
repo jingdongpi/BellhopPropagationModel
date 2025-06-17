@@ -11,9 +11,8 @@ on:
         options:
           - 'all'
           - 'centos7-x86_64'
+          - 'debian11-x86_64'
           - 'win11-x86_64'
-          - 'debian11-arm64'
-          - 'centos8-arm64'
       python_version:
         description: 'Python版本'
         required: true
@@ -56,6 +55,20 @@ jobs:
           first=false
         fi
         
+        # Debian 11 x86_64
+        if [[ "$SELECTED_PLATFORMS" == "all" || "$SELECTED_PLATFORMS" == "debian11-x86_64" ]]; then
+          if [[ "$first" == "false" ]]; then matrix_include+=","; fi
+          matrix_include+='{
+            "platform": "debian11-x86_64",
+            "runner": "ubuntu-latest",
+            "docker_image": "debian:11",
+            "arch": "x86_64",
+            "glibc": "2.31",
+            "setup_script": "debian11_setup.sh"
+          }'
+          first=false
+        fi
+        
         # Windows 11 x86_64
         if [[ "$SELECTED_PLATFORMS" == "all" || "$SELECTED_PLATFORMS" == "win11-x86_64" ]]; then
           if [[ "$first" == "false" ]]; then matrix_include+=","; fi
@@ -69,41 +82,14 @@ jobs:
           first=false
         fi
         
-        # Debian 11 ARM64
-        if [[ "$SELECTED_PLATFORMS" == "all" || "$SELECTED_PLATFORMS" == "debian11-arm64" ]]; then
-          if [[ "$first" == "false" ]]; then matrix_include+=","; fi
-          matrix_include+='{
-            "platform": "debian11-arm64",
-            "runner": "ubuntu-latest",
-            "docker_image": "arm64v8/debian:11",
-            "arch": "arm64",
-            "glibc": "2.31",
-            "setup_script": "debian11_setup.sh"
-          }'
-          first=false
-        fi
-        
-        # CentOS 8 ARM64
-        if [[ "$SELECTED_PLATFORMS" == "all" || "$SELECTED_PLATFORMS" == "centos8-arm64" ]]; then
-          if [[ "$first" == "false" ]]; then matrix_include+=","; fi
-          matrix_include+='{
-            "platform": "centos8-arm64",
-            "runner": "ubuntu-latest", 
-            "docker_image": "arm64v8/centos:8",
-            "arch": "arm64",
-            "glibc": "2.28",
-            "setup_script": "centos8_setup.sh"
-          }'
-          first=false
-        fi
-        
         matrix_include+="]"
         matrix_json="{\"include\":$matrix_include}"
         
         echo "生成的构建矩阵:"
         echo "$matrix_json" | jq '.'
         
-        echo "matrix=$matrix_json" >> $GITHUB_OUTPUT
+        # 确保 JSON 输出为单行，避免 GitHub Actions 解析错误
+        echo "matrix=$(echo "$matrix_json" | jq -c)" >> $GITHUB_OUTPUT
 
   multi-platform-build:
     needs: generate-matrix
@@ -115,12 +101,6 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-
-    - name: Set up QEMU for ARM emulation
-      if: matrix.arch == 'arm64'
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: arm64
 
     - name: Set up Docker Buildx
       if: matrix.runner == 'ubuntu-latest'
@@ -183,7 +163,7 @@ jobs:
         fi
         EOF
         
-        # Debian 11 ARM64 setup script
+        # Debian 11 x86_64 setup script
         cat > docker-build/debian11_setup.sh << 'EOF'
         #!/bin/bash
         set -ex
@@ -199,37 +179,6 @@ jobs:
         apt-get install -y python${PYTHON_VERSION} python${PYTHON_VERSION}-dev python3-pip
         
         # 创建符号链接
-        ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python
-        
-        # 安装 Python 依赖
-        python -m pip install --upgrade pip
-        python -m pip install nuitka wheel setuptools
-        
-        # 安装 NumPy 和 SciPy
-        if [[ "$PYTHON_VERSION" == "3.8" ]]; then
-          python -m pip install "numpy>=1.20.0,<2.0.0" scipy
-        else
-          python -m pip install "numpy>=2.0.0" scipy
-        fi
-        EOF
-        
-        # CentOS 8 ARM64 setup script  
-        cat > docker-build/centos8_setup.sh << 'EOF'
-        #!/bin/bash
-        set -ex
-        
-        # 修复 CentOS 8 仓库问题
-        sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-*
-        sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
-        
-        # 安装 EPEL 和编译工具
-        yum install -y epel-release
-        yum groupinstall -y "Development Tools"
-        yum install -y cmake gcc-gfortran git wget
-        
-        # 安装 Python
-        PYTHON_VERSION=$1
-        yum install -y python${PYTHON_VERSION/./} python${PYTHON_VERSION/./}-devel python3-pip
         ln -sf /usr/bin/python${PYTHON_VERSION} /usr/local/bin/python
         
         # 安装 Python 依赖

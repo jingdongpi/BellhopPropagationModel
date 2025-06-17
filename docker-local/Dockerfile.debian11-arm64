@@ -1,0 +1,19 @@
+# Debian 11 ARM64 构建环境
+FROM --platform=linux/arm64 debian:11
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 复制设置脚本
+COPY docker-local/debian11_arm64_setup.sh /setup.sh
+RUN chmod +x /setup.sh
+
+# 运行设置脚本
+ARG PYTHON_VERSION=3.8
+RUN /setup.sh $PYTHON_VERSION
+
+# 复制项目文件
+COPY . /workspace/
+
+# 设置构建命令
+CMD ["bash", "-c", "./manager.sh build clean"]

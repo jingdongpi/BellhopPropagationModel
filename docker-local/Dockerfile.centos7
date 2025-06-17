@@ -1,0 +1,19 @@
+# CentOS 7 x86_64 构建环境
+FROM centos:7
+
+# 设置工作目录
+WORKDIR /workspace
+
+# 复制设置脚本
+COPY docker-local/centos7_setup.sh /setup.sh
+RUN chmod +x /setup.sh
+
+# 运行设置脚本
+ARG PYTHON_VERSION=3.8
+RUN /setup.sh $PYTHON_VERSION
+
+# 复制项目文件
+COPY . /workspace/
+
+# 设置构建命令
+CMD ["bash", "-c", "source /opt/rh/devtoolset-7/enable && ./manager.sh build clean"]
