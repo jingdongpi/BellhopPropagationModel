@@ -15,8 +15,12 @@ on:
         description: '构建 Windows x86_64'
         type: boolean
         default: true
-      build_linux_arm64:
-        description: '构建 Linux ARM64'
+      build_debian11_arm64:
+        description: '构建 Debian 11 ARM64'
+        type: boolean
+        default: false
+      build_centos8_arm64:
+        description: '构建 CentOS 8 ARM64'
         type: boolean
         default: false
       python_versions:
@@ -36,14 +40,16 @@ jobs:
         BUILD_CENTOS7="${{ github.event.inputs.build_centos7 }}"
         BUILD_DEBIAN11="${{ github.event.inputs.build_debian11 }}"
         BUILD_WINDOWS="${{ github.event.inputs.build_windows }}"
-        BUILD_LINUX_ARM64="${{ github.event.inputs.build_linux_arm64 }}"
+        BUILD_DEBIAN11_ARM64="${{ github.event.inputs.build_debian11_arm64 }}"
+        BUILD_CENTOS8_ARM64="${{ github.event.inputs.build_centos8_arm64 }}"
         PYTHON_VERSIONS="${{ github.event.inputs.python_versions }}"
         
         echo "构建配置:"
-        echo "CentOS 7: $BUILD_CENTOS7"
-        echo "Debian 11: $BUILD_DEBIAN11"
-        echo "Windows: $BUILD_WINDOWS"
-        echo "Linux ARM64: $BUILD_LINUX_ARM64"
+        echo "CentOS 7 x86_64: $BUILD_CENTOS7"
+        echo "Debian 11 x86_64: $BUILD_DEBIAN11"
+        echo "Windows x86_64: $BUILD_WINDOWS"
+        echo "Debian 11 ARM64: $BUILD_DEBIAN11_ARM64"
+        echo "CentOS 8 ARM64: $BUILD_CENTOS8_ARM64"
         echo "Python 版本: $PYTHON_VERSIONS"
         
         matrix_include="["
@@ -88,14 +94,26 @@ jobs:
           done
         fi
         
-        # Linux ARM64
-        if [[ "$BUILD_LINUX_ARM64" == "true" ]]; then
+        # Debian 11 ARM64
+        if [[ "$BUILD_DEBIAN11_ARM64" == "true" ]]; then
           for version in "${VERSIONS[@]}"; do
             version=$(echo "$version" | xargs)
             if [[ "$first" == "false" ]]; then
               matrix_include+=","
             fi
             matrix_include+="{\"platform\":\"debian11-arm64\",\"os\":\"ubuntu-24.04-arm\",\"python-version\":\"$version\",\"docker_image\":\"debian:11\",\"setup_script\":\"debian11_arm64_setup.sh\"}"
+            first=false
+          done
+        fi
+        
+        # CentOS 8 ARM64
+        if [[ "$BUILD_CENTOS8_ARM64" == "true" ]]; then
+          for version in "${VERSIONS[@]}"; do
+            version=$(echo "$version" | xargs)
+            if [[ "$first" == "false" ]]; then
+              matrix_include+=","
+            fi
+            matrix_include+="{\"platform\":\"centos8-arm64\",\"os\":\"ubuntu-24.04-arm\",\"python-version\":\"$version\",\"docker_image\":\"quay.io/centos/centos:stream8\",\"setup_script\":\"centos8_arm64_setup.sh\"}"
             first=false
           done
         fi
@@ -111,6 +129,7 @@ jobs:
   build:
     needs: generate-matrix
     runs-on: ${{ matrix.os }}
+    name: Build ${{ matrix.platform }} (Python ${{ matrix.python-version }})
     strategy:
       fail-fast: false
       matrix: ${{ fromJson(needs.generate-matrix.outputs.matrix) }}
