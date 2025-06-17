@@ -120,13 +120,27 @@ if [[ "$PYTHON_VERSION" == "3.8" ]]; then
     echo "Python 3.8 yum 安装失败，尝试其他方法..."
     yum install -y python3 python3-devel python3-pip || true
   )
-  ln -sf /usr/bin/python3.8 /usr/local/bin/python 2>/dev/null || ln -sf /usr/bin/python3 /usr/local/bin/python || true
+  # 创建python符号链接，优先使用具体版本
+  if command -v python3.8 >/dev/null 2>&1; then
+    ln -sf $(which python3.8) /usr/local/bin/python
+    echo "✓ 创建符号链接: $(which python3.8) -> /usr/local/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    ln -sf $(which python3) /usr/local/bin/python
+    echo "✓ 创建符号链接: $(which python3) -> /usr/local/bin/python"
+  fi
 elif [[ "$PYTHON_VERSION" == "3.9" ]]; then
   yum install -y python39 python39-devel python39-pip || (
     echo "Python 3.9 yum 安装失败，尝试其他方法..."
     yum install -y python3 python3-devel python3-pip || true
   )
-  ln -sf /usr/bin/python3.9 /usr/local/bin/python 2>/dev/null || ln -sf /usr/bin/python3 /usr/local/bin/python || true
+  # 创建python符号链接，优先使用具体版本
+  if command -v python3.9 >/dev/null 2>&1; then
+    ln -sf $(which python3.9) /usr/local/bin/python
+    echo "✓ 创建符号链接: $(which python3.9) -> /usr/local/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    ln -sf $(which python3) /usr/local/bin/python
+    echo "✓ 创建符号链接: $(which python3) -> /usr/local/bin/python"
+  fi
 else
   # 从源码编译其他版本 (3.10, 3.11, 3.12)
   echo "Python $PYTHON_VERSION 需要从源码编译..."
@@ -157,12 +171,16 @@ else
   ./configure --enable-optimizations --enable-shared --prefix=/usr/local
   make -j$(nproc)
   make altinstall
-  ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
   
   # 确保动态库可以被找到
   echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf
   ldconfig
-  ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
+  
+  # 创建python符号链接
+  if [ -f /usr/local/bin/python${PYTHON_VERSION} ]; then
+    ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
+    echo "✓ 创建符号链接: /usr/local/bin/python${PYTHON_VERSION} -> /usr/local/bin/python"
+  fi
 fi
 
 # 确保 pip 可用
@@ -187,14 +205,53 @@ if ! command -v pip &> /dev/null; then
       curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
       ;;
   esac
-  python get-pip.py
+  
+  # 使用正确的Python版本运行pip安装脚本
+  if command -v python${PYTHON_VERSION} >/dev/null 2>&1; then
+    echo "使用 python${PYTHON_VERSION} 运行 pip 安装脚本..."
+    python${PYTHON_VERSION} get-pip.py
+  elif [ -f /usr/local/bin/python${PYTHON_VERSION} ]; then
+    echo "使用 /usr/local/bin/python${PYTHON_VERSION} 运行 pip 安装脚本..."
+    /usr/local/bin/python${PYTHON_VERSION} get-pip.py
+  elif command -v python3 >/dev/null 2>&1; then
+    echo "使用 python3 运行 pip 安装脚本..."
+    python3 get-pip.py
+  else
+    echo "❌ 未找到合适的Python 3解释器"
+    exit 1
+  fi
+  
   rm get-pip.py
 fi
 
 # 验证 Python 安装
 echo "验证 Python 安装..."
+
+# 确保python命令指向正确的版本
+if command -v python >/dev/null 2>&1; then
+    echo "当前 python 命令: $(python --version)"
+    echo "Python 路径: $(which python)"
+else
+    echo "⚠️  python 命令不可用，创建符号链接..."
+    if command -v python${PYTHON_VERSION} >/dev/null 2>&1; then
+        ln -sf $(which python${PYTHON_VERSION}) /usr/local/bin/python
+    elif [ -f /usr/local/bin/python${PYTHON_VERSION} ]; then
+        ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
+    fi
+fi
+
+# 再次验证
 python --version
-python -c "import sys; print(f'Python executable: {sys.executable}')"
+python -c "import sys; print('Python executable:', sys.executable)"
+
+# 验证pip
+if command -v pip >/dev/null 2>&1; then
+    echo "✓ pip 版本: $(pip --version)"
+elif python -m pip --version >/dev/null 2>&1; then
+    echo "✓ pip 模块: $(python -m pip --version)"
+else
+    echo "❌ pip 不可用"
+fi
 
 # 安装 Python 依赖
 python -m pip install --upgrade pip
