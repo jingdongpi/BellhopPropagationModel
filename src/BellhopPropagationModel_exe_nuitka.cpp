@@ -12,11 +12,17 @@
 #include <iostream>
 #include <fstream>
 #include <string>
-#include <filesystem>
+#include <sys/stat.h>  // for file existence check
 #include <Python.h>
 
 // 包含动态库头文件
 #include "BellhopPropagationModelInterface.h"
+
+// C++11兼容的文件存在检查函数
+inline bool file_exists(const std::string& path) {
+    struct stat buffer;
+    return (stat(path.c_str(), &buffer) == 0);
+}
 
 // 声明外部函数
 extern int SolveBellhopPropagationModel(const std::string& json, std::string& outJson);
@@ -101,7 +107,7 @@ int main(int argc, char* argv[]) {
     
     try {
         // 检查输入文件是否存在
-        if (!std::filesystem::exists(inputFile)) {
+        if (!file_exists(inputFile)) {
             std::cerr << "错误: 输入文件不存在: " << inputFile << std::endl;
             return 1;
         }

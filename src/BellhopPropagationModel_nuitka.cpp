@@ -8,9 +8,9 @@
 #include <Python.h>
 #include <string>
 #include <iostream>
-#include <filesystem>
 #include <vector>
 #include <cstdlib>
+#include <sys/stat.h>  // for file existence check
 
 // 条件包含动态库加载头文件
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__MINGW32__) && !defined(__MINGW64__)
@@ -18,6 +18,21 @@
 #endif
 
 #include "BellhopPropagationModelInterface.h"
+
+// C++11兼容的文件存在检查函数
+inline bool file_exists(const std::string& path) {
+    struct stat buffer;
+    return (stat(path.c_str(), &buffer) == 0);
+}
+
+// C++11兼容的路径处理函数
+std::string get_parent_path(const std::string& path) {
+    size_t pos = path.find_last_of("/\\");
+    if (pos != std::string::npos) {
+        return path.substr(0, pos);
+    }
+    return "";
+}
 
 // 全局Python解释器状态
 static bool python_initialized = false;
@@ -69,7 +84,7 @@ except:
     
     // 添加检测到的路径
     for (const auto& path : python_paths) {
-        if (std::filesystem::exists(path)) {
+        if (file_exists(path)) {
             std::string cmd = "import sys; path = r'" + path + "'; path not in sys.path and sys.path.append(path)";
             PyRun_SimpleString(cmd.c_str());
         }
@@ -247,19 +262,23 @@ bool initialize_python_environment() {
         // 通过dladdr获取当前动态库的路径，然后推断lib目录位置
         Dl_info dl_info;
         if (dladdr((void*)initialize_python_environment, &dl_info) && dl_info.dli_fname) {
-            std::filesystem::path lib_path = std::filesystem::path(dl_info.dli_fname).parent_path();
+            std::string lib_path = get_parent_path(dl_info.dli_fname);
             
             // 如果当前是在bin目录，需要找到对应的lib目录
-            if (lib_path.filename() == "bin") {
-                lib_path = lib_path.parent_path() / "lib";
+            size_t pos = lib_path.find_last_of("/\\");
+            if (pos != std::string::npos) {
+                std::string dir_name = lib_path.substr(pos + 1);
+                if (dir_name == "bin") {
+                    lib_path = get_parent_path(lib_path) + "/lib";
+                }
             }
             
-            std::string python_code = "import sys; lib_path = r'" + lib_path.string() + 
+            std::string python_code = "import sys; lib_path = r'" + lib_path + 
                                     "'; lib_path not in sys.path and sys.path.insert(0, lib_path)";
             PyRun_SimpleString(python_code.c_str());
             
             // 输出调试信息
-            std::string debug_code = "print('Added lib path:', r'" + lib_path.string() + "')";
+            std::string debug_code = "print('Added lib path:', r'" + lib_path + "')";
             PyRun_SimpleString(debug_code.c_str());
             std::string debug_code2 = "print('Python sys.path:', sys.path[:3])";
             PyRun_SimpleString(debug_code2.c_str());
