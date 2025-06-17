@@ -71,10 +71,14 @@ fi
 
 # 确保 pip 可用
 if ! command -v pip &> /dev/null; then
-  echo "安装 pip..."
-  curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
-  python get-pip.py
-  rm get-pip.py
+    3.8)
+      echo "使用 Python 3.8 专用的 pip 安装脚本..."
+      curl https://bootstrap.pypa.io/pip/3.8/get-pip.py -o get-pip.py
+      ;;
+    *)
+      echo "使用最新的 pip 安装脚本..."
+      curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+      ;;
 fi
 
 # 验证 Python 安装

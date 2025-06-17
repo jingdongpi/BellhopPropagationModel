@@ -72,7 +72,17 @@ fi
 # 确保 pip 可用
 if ! command -v pip &> /dev/null; then
   echo "安装 pip..."
-  curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+  # 根据 Python 版本选择合适的 pip 安装脚本
+  case $PYTHON_VERSION in
+    3.8)
+      echo "使用 Python 3.8 专用的 pip 安装脚本..."
+      curl https://bootstrap.pypa.io/pip/3.8/get-pip.py -o get-pip.py
+      ;;
+    *)
+      echo "使用最新的 pip 安装脚本..."
+      curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+      ;;
+  esac
   python get-pip.py
   rm get-pip.py
 fi
