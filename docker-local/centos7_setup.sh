@@ -3,22 +3,22 @@ set -ex
 
 # CentOS 7 x86_64 环境设置脚本
 
-# 修复 CentOS 7 EOL 仓库问题（全面修复）
+# 修复 CentOS 7 EOL 仓库问题（彻底重建）
 echo "修复 CentOS 7 EOL 仓库问题..."
 
 # 备份原始仓库文件
-cp -r /etc/yum.repos.d /etc/yum.repos.d.backup || true
+cp -r /etc/yum.repos.d /etc/yum.repos.d.backup 2>/dev/null || true
 
-# 禁用所有原有仓库（避免EOL错误）
-for repo in /etc/yum.repos.d/CentOS-*.repo; do
-    if [ -f "$repo" ]; then
-        sed -i 's/enabled=1/enabled=0/g' "$repo"
-        echo "禁用仓库: $repo"
-    fi
-done
+# 完全清理现有仓库配置，避免冲突和重复
+echo "清理现有仓库配置..."
+rm -f /etc/yum.repos.d/CentOS-*.repo
+rm -f /etc/yum.repos.d/*scl*.repo
+rm -f /etc/yum.repos.d/*SCL*.repo
+rm -f /etc/yum.repos.d/epel*.repo
+rm -f /etc/yum.repos.d/*AliYun*.repo
 
-# 清理可能存在的SCL配置
-rm -f /etc/yum.repos.d/CentOS-SCLo-scl*.repo || true
+# 清理yum缓存
+yum clean all || true
 
 # 创建国内镜像源配置（使用阿里云镜像）
 cat > /etc/yum.repos.d/CentOS-AliYun.repo << 'EOF'
@@ -88,26 +88,30 @@ gpgcheck=1
 gpgkey=http://mirrors.aliyun.com/epel/RPM-GPG-KEY-EPEL-7
 EOF
 
-# 清理并重建 yum 缓存
+# 重建 yum 缓存
 echo "重建yum缓存..."
-yum clean all || true
-yum makecache fast || yum makecache || true
+yum clean all
+yum makecache || (
+    echo "⚠️  makecache失败，尝试基础缓存..."
+    yum makecache fast || true
+)
 
-# 跳过EPEL独立安装（已在镜像配置中包含）
-echo "✓ EPEL已在镜像源配置中包含"
-
-# 安装 SCL （通过新配置的镜像源）
-echo "安装 centos-release-scl..."
-yum install -y centos-release-scl || (
-    echo "SCL 安装失败，但SCL仓库已在镜像配置中，继续..."
+# 测试仓库连接
+echo "测试仓库连接..."
+yum repolist enabled || (
+    echo "⚠️  repolist失败，但继续安装..."
     true
 )
+
+# 跳过额外的仓库安装（已在配置文件中包含）
+echo "✓ 所有仓库已配置完成"
 
 # 系统更新（容错处理）
 echo "系统更新..."
 yum update -y || (
     echo "⚠️  yum update 失败，继续安装必要包..."
     true
+)
 )
 
 # 安装编译工具（容错处理）
