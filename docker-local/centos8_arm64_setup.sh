@@ -1,6 +1,10 @@
-# CentOS 8 ARM64 环境设置脚本
 #!/bin/bash
+# CentOS 8 ARM64 环境设置脚本
 set -ex
+
+# 替换软件源（CentOS 8 已EOL）
+sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* || true
+sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* || true
 
 # 安装基础工具
 dnf update -y

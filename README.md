@@ -4,9 +4,37 @@
 
 ## 🚀 快速开始
 
-### 本地构建（推荐）
+### GitHub Actions 云端构建（推荐）
 
-本项目现已**全面改为本地 Docker 构建**，支持多平台一键构建。
+本项目支持 **GitHub Actions 多平台自动构建**，无需本地环境配置。
+
+#### 1. 在 GitHub 上触发构建
+1. 进入 GitHub 仓库页面
+2. 点击 **Actions** 标签
+3. 选择 **Multi-Platform Build** 工作流
+4. 点击 **Run workflow** 按钮
+5. 选择构建选项：
+   - ✅ 构建 CentOS 7 x86_64
+   - ✅ 构建 Debian 11 x86_64
+   - ✅ 构建 Windows x86_64
+   - ⬜ 构建 Linux ARM64
+   - Python 版本：`3.8,3.9`
+
+#### 2. 下载构建产物
+构建完成后，在 Actions 页面下载：
+- `bellhop-centos7-x64-python3.8` - CentOS 7 兼容版本
+- `bellhop-debian11-x64-python3.8` - Debian 11 版本
+- `bellhop-win11-x64-python3.8` - Windows 版本
+- `build-info-*` - 各平台兼容性信息
+
+#### 3. 测试单个平台
+使用 **Test Build** 工作流快速测试：
+1. 选择 **Test Build** 工作流
+2. 选择测试平台（debian11-x64/centos7-x64/win11-x64）
+3. 选择 Python 版本
+4. 运行并检查结果
+
+### 本地构建方式
 
 #### 1. 验证构建环境
 ```bash
@@ -63,15 +91,35 @@ BellhopPropagationModel/
 
 ## 🏗️ 支持的构建平台
 
-| 平台 | 架构 | GLIBC 要求 | 适用系统 |
-|------|------|------------|----------|
-| CentOS 7 x86_64 | x86_64 | 2.17+ | RHEL/CentOS 7+, Ubuntu 16.04+ |
-| Debian 11 x86_64 | x86_64 | 2.31+ | Debian 11+, Ubuntu 20.04+ |
-| Debian 11 ARM64 | ARM64 | 2.31+ | ARM64 Linux (树莓派4+) |
-| CentOS 8 ARM64 | ARM64 | 2.28+ | ARM64 RHEL/CentOS 8+ |
-| Windows 11 x86_64 | x86_64 | - | Windows 10+ 64位 |
+| 平台 | GitHub Actions | 本地 Docker | 兼容性 |
+|------|----------------|-------------|--------|
+| CentOS 7 x86_64 | ✅ ubuntu-22.04 + Docker | ✅ | GLIBC 2.17+ |
+| Debian 11 x86_64 | ✅ ubuntu-22.04 + Docker | ✅ | GLIBC 2.31+ |
+| Windows 11 x64 | ✅ windows-2022 | ✅ PowerShell | Windows 10+ |
+| Debian 11 ARM64 | ✅ ubuntu-22.04-arm + Docker | ✅ | ARM64 Linux |
+| CentOS 8 ARM64 | ✅ ubuntu-22.04-arm + Docker | ✅ | ARM64 CentOS |
+
+### 🎯 构建方式对比
+
+| 特性 | GitHub Actions | 本地构建 |
+|------|----------------|----------|
+| **设置难度** | 🟢 无需配置 | 🟡 需要 Docker |
+| **构建速度** | 🟡 中等（云端） | 🟢 快速（本地） |
+| **多平台支持** | 🟢 全自动 | 🟢 Docker 支持 |
+| **资源使用** | 🟢 免费额度 | 🟡 本地资源 |
+| **适用场景** | 发布、CI/CD | 开发、测试 |
 
 ## 🔧 管理命令
+
+### GitHub Actions 云端构建
+```bash
+# 1. 进入 GitHub 仓库 -> Actions 标签
+# 2. 选择工作流：
+#    - Multi-Platform Build (完整构建)
+#    - Test Build (单平台测试)
+# 3. 点击 Run workflow，选择构建选项
+# 4. 下载构建产物和构建信息
+```
 
 ### 本地多平台构建
 ```bash
@@ -145,17 +193,19 @@ g++ -o myapp myapp.cpp -L./lib -lBellhopPropagationModel
 
 ## 🛠️ 技术架构
 
-- **多平台支持**: Docker 本地构建，支持 x86_64 和 ARM64
+- **云端构建**: GitHub Actions + Docker 多平台自动构建
+- **多平台支持**: Docker 容器化，支持 x86_64 和 ARM64
 - **核心计算**: Python + Nuitka 编译优化
 - **接口层**: C++ 动态库
-- **构建系统**: CMake + Docker + 自动化脚本
+- **构建系统**: CMake + Docker + GitHub Actions
 - **性能**: 比纯 Python 版本提升 20-50%
 - **兼容性**: 支持不同 GLIBC 版本，向下兼容
 
 ## 📚 文档
 
 - [本地构建指南](LOCAL_BUILD_GUIDE.md) - 详细的多平台构建说明
+- [GitHub Actions](../../actions) - 云端自动构建
 - [构建历史](.github/workflows-archive/README.md) - 旧版 CI/CD 配置存档
 
 ---
-*版本: 1.0.0 | 海洋声传播计算工具 | 本地 Docker 多平台构建*
+*版本: 1.0.0 | 海洋声传播计算工具 | GitHub Actions + 本地 Docker 多平台构建*
