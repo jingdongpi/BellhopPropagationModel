@@ -242,47 +242,117 @@ jobs:
           Set-Location "C:\mingw-temp"
           
           # 下载 MinGW-w64 6.3.0 (x86_64-posix-seh)
-          $mingwUrl = "https://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win64/Personal%20Builds/mingw-builds/6.3.0/threads-posix/seh/x86_64-6.3.0-release-posix-seh-rt_v5-rev2.7z/download"
           Write-Host "正在下载 MinGW 6.3.0..."
           
-          try {
-            Invoke-WebRequest -Uri $mingwUrl -OutFile "mingw-6.3.0.7z" -TimeoutSec 300
-            Write-Host "✓ 下载完成"
-          } catch {
-            Write-Host "❌ 下载失败，尝试备用链接..."
-            # 备用下载链接
-            $backupUrl = "https://github.com/niXman/mingw-builds-binaries/releases/download/6.3.0-rt_v5-rev2/x86_64-6.3.0-release-posix-seh-rt_v5-rev2.7z"
-            Invoke-WebRequest -Uri $backupUrl -OutFile "mingw-6.3.0.7z" -TimeoutSec 300
-          }
+          # 定义多个下载源
+          $downloadUrls = @(
+            "https://github.com/niXman/mingw-builds-binaries/releases/download/6.3.0-rt_v5-rev2/x86_64-6.3.0-release-posix-seh-rt_v5-rev2.7z",
+            "https://sourceforge.net/projects/mingw-w64/files/Toolchains%20targetting%20Win64/Personal%20Builds/mingw-builds/6.3.0/threads-posix/seh/x86_64-6.3.0-release-posix-seh-rt_v5-rev2.7z/download"
+          )
           
-          # 安装 7-Zip 用于解压
-          if (!(Get-Command 7z -ErrorAction SilentlyContinue)) {
-            choco install -y 7zip
-          }
-          
-          # 解压到 C:\mingw-6.3.0
-          Write-Host "解压 MinGW 6.3.0..."
-          & 7z x mingw-6.3.0.7z -o"C:\"
-          
-          # 重命名目录
-          if (Test-Path "C:\mingw64") {
-            if (Test-Path "C:\mingw-6.3.0") {
-              Remove-Item "C:\mingw-6.3.0" -Recurse -Force
+          $downloadSuccess = $false
+          foreach ($url in $downloadUrls) {
+            try {
+              Write-Host "尝试从: $url"
+              Invoke-WebRequest -Uri $url -OutFile "mingw-6.3.0.7z" -TimeoutSec 300
+              
+              # 验证下载的文件
+              $fileSize = (Get-Item "mingw-6.3.0.7z").Length
+              Write-Host "下载文件大小: $($fileSize / 1MB) MB"
+              
+              if ($fileSize -gt 1MB) {
+                # 检查文件头是否为7z格式
+                $fileHeader = Get-Content "mingw-6.3.0.7z" -Encoding Byte -TotalCount 6
+                if ($fileHeader[0] -eq 55 -and $fileHeader[1] -eq 122) {  # "7z" magic number
+                  Write-Host "✓ 下载完成，文件格式验证通过"
+                  $downloadSuccess = $true
+                  break
+                } else {
+                  Write-Host "❌ 文件格式错误，尝试下一个源..."
+                  Remove-Item "mingw-6.3.0.7z" -Force
+                }
+              } else {
+                Write-Host "❌ 文件太小，可能是错误页面，尝试下一个源..."
+                Remove-Item "mingw-6.3.0.7z" -Force
+              }
+            } catch {
+              Write-Host "❌ 下载失败: $($_.Exception.Message)"
             }
-            Rename-Item "C:\mingw64" "C:\mingw-6.3.0"
           }
           
-          # 清理临时文件
-          Set-Location "C:\"
-          Remove-Item "C:\mingw-temp" -Recurse -Force
+          if (-not $downloadSuccess) {
+            Write-Host "❌ 所有下载源都失败，使用系统现有的MinGW"
+            Write-Host "MinGW 版本信息:"
+            gcc --version
+            $env:PATH = "C:\tools\mingw64\bin;C:\msys64\mingw64\bin;$env:PATH"
+          } else {
           
-          Write-Host "✓ MinGW 6.3.0 安装完成"
+          } else {
+            # 安装 7-Zip 用于解压
+            if (!(Get-Command 7z -ErrorAction SilentlyContinue)) {
+              Write-Host "安装 7-Zip..."
+              choco install -y 7zip
+              # 刷新环境变量
+              $env:PATH = "$env:PATH;C:\Program Files\7-Zip"
+            }
+            
+            # 解压到 C:\mingw-6.3.0
+            Write-Host "解压 MinGW 6.3.0..."
+            try {
+              & 7z x mingw-6.3.0.7z -o"C:\" -y
+              
+              # 重命名目录（如果需要）
+              if (Test-Path "C:\mingw64") {
+                if (Test-Path "C:\mingw-6.3.0") {
+                  Remove-Item "C:\mingw-6.3.0" -Recurse -Force
+                }
+                Rename-Item "C:\mingw64" "C:\mingw-6.3.0"
+                Write-Host "✓ MinGW 6.3.0 解压并重命名完成"
+              } elseif (Test-Path "C:\x86_64-6.3.0-release-posix-seh-rt_v5-rev2") {
+                if (Test-Path "C:\mingw-6.3.0") {
+                  Remove-Item "C:\mingw-6.3.0" -Recurse -Force
+                }
+                Rename-Item "C:\x86_64-6.3.0-release-posix-seh-rt_v5-rev2" "C:\mingw-6.3.0"
+                Write-Host "✓ MinGW 6.3.0 解压并重命名完成"
+              } else {
+                Write-Host "❌ 解压后未找到预期的目录结构"
+                Get-ChildItem "C:\" | Where-Object { $_.Name -like "*mingw*" -or $_.Name -like "*6.3.0*" }
+              }
+            } catch {
+              Write-Host "❌ 解压失败: $($_.Exception.Message)"
+              Write-Host "使用系统现有的MinGW"
+            }
+            
+            # 清理临时文件
+            Set-Location "C:\"
+            Remove-Item "C:\mingw-temp" -Recurse -Force -ErrorAction SilentlyContinue
+          }
         }
         
-        # 确保 MinGW 6.3.0 在 PATH 中
-        $env:PATH = "C:\mingw-6.3.0\bin;$env:PATH"
-        Write-Host "MinGW 版本信息:"
-        gcc --version
+        # 确保正确的 MinGW 在 PATH 中
+        $mingwPaths = @(
+          "C:\mingw-6.3.0\bin",
+          "C:\tools\mingw64\bin",
+          "C:\msys64\mingw64\bin"
+        )
+        
+        foreach ($path in $mingwPaths) {
+          if (Test-Path $path) {
+            $env:PATH = "$path;$env:PATH"
+            Write-Host "使用 MinGW 路径: $path"
+            break
+          }
+        }
+        
+        Write-Host "最终 MinGW 版本信息:"
+        try {
+          gcc --version
+          Write-Host "✓ gcc 可用"
+        } catch {
+          Write-Host "❌ gcc 不可用"
+          # 显示PATH以便调试
+          Write-Host "当前 PATH: $env:PATH"
+        }
         
         # 安装 Python 依赖
         python -m pip install --upgrade pip
