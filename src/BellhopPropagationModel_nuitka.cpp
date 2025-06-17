@@ -145,29 +145,71 @@ bool initialize_python_environment() {
     try {
         // 预加载Python共享库以解决符号链接问题（仅在Linux/Unix系统）
 #if !defined(_WIN32) && !defined(_WIN64) && !defined(__MINGW32__) && !defined(__MINGW64__)
-        // 尝试多个可能的Python库版本
+        // 智能加载Python动态库
         void* python_lib = nullptr;
-        std::vector<std::string> python_libs = {
-            "libpython3.9.so",
-            "libpython3.9.so.1.0", 
-            "libpython3.8.so",
-            "libpython3.8.so.1.0",
-            "libpython3.10.so",
-            "libpython3.10.so.1.0",
-            "libpython3.11.so",
-            "libpython3.11.so.1.0"
-        };
+        std::string loaded_lib;
         
+        // 首先尝试获取当前Python版本信息
+        std::string current_python_version;
+        FILE* fp = popen("python3 --version 2>&1", "r");
+        if (fp) {
+            char buffer[128];
+            if (fgets(buffer, sizeof(buffer), fp)) {
+                current_python_version = std::string(buffer);
+                // 提取版本号 (例如: "Python 3.8.10" -> "3.8")
+                size_t start = current_python_version.find("Python ");
+                if (start != std::string::npos) {
+                    start += 7; // "Python ".length()
+                    size_t end = current_python_version.find('.', start);
+                    if (end != std::string::npos) {
+                        end = current_python_version.find('.', end + 1);
+                        if (end != std::string::npos) {
+                            current_python_version = current_python_version.substr(start, end - start);
+                        }
+                    }
+                }
+            }
+            pclose(fp);
+        }
+        
+        // 构建优先查找列表（当前版本优先）
+        std::vector<std::string> python_libs;
+        std::vector<std::string> all_versions = {"3.12", "3.11", "3.10", "3.9", "3.8"};
+        
+        // 首先添加当前版本的所有变体
+        if (!current_python_version.empty()) {
+            std::cout << "✓ 检测到Python版本: " << current_python_version << std::endl;
+            python_libs.push_back("libpython" + current_python_version + ".so");
+            python_libs.push_back("libpython" + current_python_version + ".so.1.0");
+            python_libs.push_back("libpython" + current_python_version + ".so.1");
+        }
+        
+        // 然后添加其他版本
+        for (const auto& version : all_versions) {
+            if (version != current_python_version) {
+                python_libs.push_back("libpython" + version + ".so");
+                python_libs.push_back("libpython" + version + ".so.1.0");
+                python_libs.push_back("libpython" + version + ".so.1");
+            }
+        }
+        
+        // 尝试加载库
         for (const auto& lib : python_libs) {
             python_lib = dlopen(lib.c_str(), RTLD_LAZY | RTLD_GLOBAL);
             if (python_lib) {
+                loaded_lib = lib;
                 std::cout << "✓ 成功加载Python库: " << lib << std::endl;
                 break;
             }
         }
         
         if (!python_lib) {
-            std::cerr << "⚠️  未找到兼容的Python共享库，尝试使用系统默认..." << std::endl;
+            std::cerr << "⚠️  未找到兼容的Python共享库" << std::endl;
+            std::cerr << "   已尝试的库文件:" << std::endl;
+            for (const auto& lib : python_libs) {
+                std::cerr << "     " << lib << std::endl;
+            }
+            std::cerr << "   建议检查Python安装和LD_LIBRARY_PATH设置" << std::endl;
         }
 #endif
         
