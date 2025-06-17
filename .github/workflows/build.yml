@@ -24,9 +24,17 @@ on:
         default: 'x86_64'
         type: choice
         options:
-          - 'x86_64'
-          - 'x86'
-          - 'all'
+            - 'x86_64'
+            - 'x86'
+            - 'all'
+        compatibility:
+          description: '兼容性级别'
+          required: true
+          default: 'modern'
+          type: choice
+          options:
+            - 'modern'
+            - 'legacy'
 
 jobs:
   generate-matrix:
@@ -41,11 +49,13 @@ jobs:
         PLATFORM="${{ github.event.inputs.platform }}"
         PYTHON_VERSIONS="${{ github.event.inputs.python_versions }}"
         ARCHITECTURE="${{ github.event.inputs.architecture }}"
+        COMPATIBILITY="${{ github.event.inputs.compatibility }}"
         
         echo "构建配置:"
         echo "平台: $PLATFORM"
         echo "Python 版本: $PYTHON_VERSIONS"
         echo "架构: $ARCHITECTURE"
+        echo "兼容性: $COMPATIBILITY"
         
         # 生成矩阵 JSON
         matrix_include="["
@@ -87,7 +97,11 @@ jobs:
               
               # 确定操作系统
               if [[ "$platform" == "linux" ]]; then
-                os="ubuntu-22.04"
+                if [[ "$COMPATIBILITY" == "legacy" ]]; then
+                  os="ubuntu-20.04"  # 使用较老版本提高兼容性 (GLIBC 2.31)
+                else
+                  os="ubuntu-22.04"  # 现代版本 (GLIBC 2.34)
+                fi
               else
                 os="windows-2019"
               fi
@@ -214,17 +228,69 @@ jobs:
       run: |
         mkdir -p build
         cd build
+        
+        # 获取当前Python的路径和版本信息
+        PYTHON_EXECUTABLE=$(which python)
+        PYTHON_INCLUDE_DIR=$(python -c "import sysconfig; print(sysconfig.get_path('include'))")
+        PYTHON_LIBRARY=$(python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))")
+        PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+        
+        echo "=== Python CMake Configuration ==="
+        echo "Python executable: $PYTHON_EXECUTABLE"
+        echo "Python include dir: $PYTHON_INCLUDE_DIR"
+        echo "Python library dir: $PYTHON_LIBRARY"
+        echo "Python version: $PYTHON_VERSION"
+        
+        # 查找具体的Python库文件
+        PYTHON_LIBRARY_FILE="${PYTHON_LIBRARY}/libpython${PYTHON_VERSION}.so"
+        if [ ! -f "$PYTHON_LIBRARY_FILE" ]; then
+          # 尝试其他可能的命名
+          PYTHON_LIBRARY_FILE="${PYTHON_LIBRARY}/libpython${PYTHON_VERSION}m.so"
+        fi
+        
+        echo "Python library file: $PYTHON_LIBRARY_FILE"
+        
+        # 根据兼容性设置添加额外的编译选项
+        EXTRA_CMAKE_FLAGS=""
+        if [[ "${{ github.event.inputs.compatibility }}" == "legacy" ]]; then
+          echo "=== 启用遗留兼容模式 ==="
+          # 静态链接libstdc++和libgcc以减少依赖
+          export CXXFLAGS="-static-libgcc -static-libstdc++"
+          export LDFLAGS="-static-libgcc -static-libstdc++"
+          EXTRA_CMAKE_FLAGS="-DCMAKE_CXX_FLAGS_RELEASE='-O3 -DNDEBUG -static-libgcc -static-libstdc++'"
+        fi
+        
         cmake .. \
           -DBUILD_EXECUTABLE=ON \
           -DBUILD_SHARED_LIBS=ON \
           -DCMAKE_BUILD_TYPE=Release \
-          -DCMAKE_VERBOSE_MAKEFILE=ON
+          -DCMAKE_VERBOSE_MAKEFILE=ON \
+          -DPython3_EXECUTABLE="$PYTHON_EXECUTABLE" \
+          -DPython3_INCLUDE_DIR="$PYTHON_INCLUDE_DIR" \
+          -DPython3_LIBRARY="$PYTHON_LIBRARY_FILE" \
+          $EXTRA_CMAKE_FLAGS
           
     - name: Configure CMake (Windows)
       if: matrix.platform == 'windows'
       run: |
         mkdir build
         cd build
+        
+        # 获取当前Python的路径和版本信息
+        $pythonExe = (Get-Command python).Source
+        $pythonInclude = python -c "import sysconfig; print(sysconfig.get_path('include'))"
+        $pythonLibDir = python -c "import sysconfig; print(sysconfig.get_config_var('LIBDIR'))"
+        $pythonVersion = python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')"
+        
+        echo "=== Python CMake Configuration ==="
+        echo "Python executable: $pythonExe"
+        echo "Python include dir: $pythonInclude"
+        echo "Python library dir: $pythonLibDir"
+        echo "Python version: $pythonVersion"
+        
+        # Windows Python库文件格式
+        $pythonLibrary = "$pythonLibDir\python$($pythonVersion.Replace('.', '')).lib"
+        echo "Python library file: $pythonLibrary"
         
         # 设置架构相关的编译器标志
         if ("${{ matrix.arch }}" -eq "x86") {
@@ -245,7 +311,10 @@ jobs:
           -DCMAKE_CXX_COMPILER="g++" `
           -DCMAKE_C_FLAGS="$archFlags" `
           -DCMAKE_CXX_FLAGS="$archFlags" `
-          -DCMAKE_SYSTEM_PROCESSOR="$targetArch"
+          -DCMAKE_SYSTEM_PROCESSOR="$targetArch" `
+          -DPython3_EXECUTABLE="$pythonExe" `
+          -DPython3_INCLUDE_DIR="$pythonInclude" `
+          -DPython3_LIBRARY="$pythonLibrary"
       shell: pwsh
           
     - name: Build project (Linux)
