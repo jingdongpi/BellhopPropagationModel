@@ -112,7 +112,6 @@ yum update -y || (
     echo "⚠️  yum update 失败，继续安装必要包..."
     true
 )
-)
 
 # 安装编译工具（容错处理）
 echo "安装编译工具..."
