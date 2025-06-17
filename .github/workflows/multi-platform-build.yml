@@ -22,7 +22,7 @@ on:
       python_versions:
         description: 'Python 版本 (用逗号分隔)'
         required: false
-        default: '3.8,3.9'
+        default: '3.9,3.10'
 
 jobs:
   generate-matrix:
@@ -131,62 +131,57 @@ jobs:
         echo "Docker镜像: ${{ matrix.docker_image }}"
         echo "Python版本: ${{ matrix.python-version }}"
         
-        # 创建 Docker 构建脚本
-        cat > docker_build.sh << 'EOF'
-        #!/bin/bash
-        set -ex
+        # 创建简化的构建 Dockerfile
+        cat > Dockerfile.build << EOF
+        FROM ${{ matrix.docker_image }}
         
-        # 复制设置脚本到容器
-        docker run --name temp-setup ${{ matrix.docker_image }} echo "Setup container"
-        docker cp docker-local/${{ matrix.setup_script }} temp-setup:/setup.sh
-        docker commit temp-setup build-image
-        docker rm temp-setup
+        # 复制设置脚本并运行
+        COPY docker-local/${{ matrix.setup_script }} /setup.sh
+        RUN chmod +x /setup.sh && /setup.sh ${{ matrix.python-version }}
         
-        # 运行设置脚本
-        docker run --name build-container build-image bash -c "chmod +x /setup.sh && /setup.sh ${{ matrix.python-version }}"
-        docker commit build-container build-ready
-        docker rm build-container
+        # 设置工作目录
+        WORKDIR /workspace
+        
+        # 复制项目文件
+        COPY . .
         
         # 构建项目
-        docker run --rm -v $(pwd):/workspace -w /workspace build-ready bash -c "
-          set -ex
-          echo '=== 系统信息 ==='
-          uname -a
-          python --version
-          
-          # 激活编译环境（CentOS 7 需要）
-          if [ -f /opt/rh/devtoolset-7/enable ]; then
-            source /opt/rh/devtoolset-7/enable
-          fi
-          
-          # 创建构建目录
-          mkdir -p build
-          cd build
-          
-          # 配置 CMake
-          cmake .. \
-            -DCMAKE_BUILD_TYPE=Release \
-            -DBUILD_EXECUTABLE=ON \
-            -DBUILD_SHARED_LIBS=ON \
-            -DPython3_EXECUTABLE=\$(which python)
-          
-          # 编译
-          make -j\$(nproc)
-          
-          # 编译 Python 模块
-          cd ..
-          if [ -f scripts/compile_nuitka_cross_platform.py ]; then
-            python scripts/compile_nuitka_cross_platform.py
-          fi
-          
-          # 检查构建结果
-          echo '=== 构建产物检查 ==='
-          find bin lib -type f 2>/dev/null || echo '构建产物目录不存在'
-        "
+        RUN set -ex && \
+            echo "=== 系统信息 ===" && \
+            uname -a && \
+            python --version && \
+            echo "=== 开始构建 ===" && \
+            if [ -f /opt/rh/devtoolset-7/enable ]; then source /opt/rh/devtoolset-7/enable; fi && \
+            mkdir -p build && \
+            cd build && \
+            cmake .. \
+              -DCMAKE_BUILD_TYPE=Release \
+              -DBUILD_EXECUTABLE=ON \
+              -DBUILD_SHARED_LIBS=ON \
+              -DPython3_EXECUTABLE=\$(which python) && \
+            make -j\$(nproc) && \
+            cd .. && \
+            if [ -f scripts/compile_nuitka_cross_platform.py ]; then \
+              python scripts/compile_nuitka_cross_platform.py; \
+            fi && \
+            echo "=== 构建完成 ==="
         EOF
         
-        chmod +x docker_build.sh
-        ./docker_build.sh
+        # 构建 Docker 镜像
+        docker build -f Dockerfile.build -t build-${{ matrix.platform }} .
+        
+        # 从容器中复制构建产物
+        container_id=$(docker create build-${{ matrix.platform }})
+        docker cp $container_id:/workspace/bin ./bin-${{ matrix.platform }} || mkdir -p ./bin-${{ matrix.platform }}
+        docker cp $container_id:/workspace/lib ./lib-${{ matrix.platform }} || mkdir -p ./lib-${{ matrix.platform }}
+        docker cp $container_id:/workspace/include ./include-${{ matrix.platform }} || mkdir -p ./include-${{ matrix.platform }}
+        docker rm $container_id
+        
+        # 整理构建产物
+        mkdir -p build-output
+        if [ -d ./bin-${{ matrix.platform }} ]; then mv ./bin-${{ matrix.platform }} build-output/bin; fi
+        if [ -d ./lib-${{ matrix.platform }} ]; then mv ./lib-${{ matrix.platform }} build-output/lib; fi
+        if [ -d ./include-${{ matrix.platform }} ]; then mv ./include-${{ matrix.platform }} build-output/include; fi
 
     - name: Build Windows platform
       if: matrix.os == 'windows-latest'
@@ -242,9 +237,11 @@ jobs:
           python scripts/compile_nuitka_cross_platform.py
         }
         
-        # 检查构建结果
-        Write-Host "=== 构建产物检查 ==="
-        Get-ChildItem bin, lib -ErrorAction SilentlyContinue
+        # 整理 Windows 构建产物
+        New-Item -ItemType Directory -Force -Path build-output
+        if (Test-Path "bin") { Move-Item bin build-output/ }
+        if (Test-Path "lib") { Move-Item lib build-output/ }
+        if (Test-Path "include") { Move-Item include build-output/ }
       shell: pwsh
 
     - name: Upload build artifacts
@@ -252,9 +249,7 @@ jobs:
       with:
         name: bellhop-${{ matrix.platform }}-python${{ matrix.python-version }}
         path: |
-          bin/
-          lib/
-          include/
+          build-output/
         retention-days: 30
 
     - name: Create build info
