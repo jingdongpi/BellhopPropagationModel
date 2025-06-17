@@ -33,67 +33,59 @@ on:
           - 'x86'
 
 jobs:
-  # 决定需要构建哪些任务的作业
-  determine-matrix:
-    runs-on: ubuntu-latest
-    outputs:
-      matrix: ${{ steps.set-matrix.outputs.matrix }}
-    steps:
-      - name: Determine build matrix
-        id: set-matrix
-        run: |
-          # 根据输入参数构建矩阵
-          matrix='{"include":[]}'
-          
-          # 定义所有可能的组合
-          platforms=()
-          python_versions=()
-          architectures=()
-          
-          # 确定平台
-          if [[ "${{ inputs.platform }}" == "all" ]]; then
-            platforms=("linux" "windows")
-          else
-            platforms=("${{ inputs.platform }}")
-          fi
-          
-          # 确定Python版本
-          if [[ "${{ inputs.python_version }}" == "all" ]]; then
-            python_versions=("3.8" "3.10" "3.12")
-          else
-            python_versions=("${{ inputs.python_version }}")
-          fi
-          
-          # 确定架构
-          architectures=("${{ inputs.architecture }}")
-          
-          # 生成矩阵组合
-          for platform in "${platforms[@]}"; do
-            for python_version in "${python_versions[@]}"; do
-              for arch in "${architectures[@]}"; do
-                if [[ "$platform" == "linux" ]]; then
-                  os="ubuntu-22.04"
-                else
-                  os="windows-2019"
-                fi
-                
-                # 添加到矩阵
-                matrix=$(echo "$matrix" | jq --arg os "$os" --arg pv "$python_version" --arg platform "$platform" --arg arch "$arch" \
-                  '.include += [{"os": $os, "python-version": $pv, "platform": $platform, "arch": $arch}]')
-              done
-            done
-          done
-          
-          echo "matrix=$matrix" >> $GITHUB_OUTPUT
-          echo "Generated matrix: $matrix"
-
   build:
     name: Build on ${{ matrix.platform }}-${{ matrix.arch }} (Python ${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}
-    needs: determine-matrix
+    # 只有当满足条件时才运行
+    if: >
+      (inputs.platform == 'all' || inputs.platform == matrix.platform) &&
+      (inputs.python_version == 'all' || inputs.python_version == matrix.python-version) &&
+      (inputs.architecture == matrix.arch)
     strategy:
       fail-fast: false
-      matrix: ${{fromJson(needs.determine-matrix.outputs.matrix)}}
+      matrix:
+        include:
+          # Windows x86-64 (MinGW32)
+          - os: windows-2019
+            python-version: '3.8'
+            platform: windows
+            arch: x86_64
+          - os: windows-2019
+            python-version: '3.10'
+            platform: windows
+            arch: x86_64
+          - os: windows-2019
+            python-version: '3.12'
+            platform: windows
+            arch: x86_64
+          
+          # Windows x86 (MinGW32)
+          - os: windows-2019
+            python-version: '3.8'
+            platform: windows
+            arch: x86
+          - os: windows-2019
+            python-version: '3.10'
+            platform: windows
+            arch: x86
+          - os: windows-2019
+            python-version: '3.12'
+            platform: windows
+            arch: x86
+          
+          # Linux x86-64
+          - os: ubuntu-22.04
+            python-version: '3.8'
+            platform: linux
+            arch: x86_64
+          - os: ubuntu-22.04
+            python-version: '3.10'
+            platform: linux
+            arch: x86_64
+          - os: ubuntu-22.04
+            python-version: '3.12'
+            platform: linux
+            arch: x86_64
         
     steps:
     - name: Checkout repository
