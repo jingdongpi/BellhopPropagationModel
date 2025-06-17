@@ -327,10 +327,13 @@ jobs:
             }
             
             # 清理临时文件
-            Set-Location "C:\"
             Remove-Item "C:\mingw-temp" -Recurse -Force -ErrorAction SilentlyContinue
           }
         }
+        
+        # 确保切换回项目根目录
+        Set-Location $env:GITHUB_WORKSPACE
+        Write-Host "切换回项目根目录: $(Get-Location)"
         
         # 确保正确的 MinGW 在 PATH 中
         $mingwPaths = @(
@@ -384,6 +387,18 @@ jobs:
         python --version
         Write-Host "Architecture: $env:PROCESSOR_ARCHITECTURE"
         
+        # 确保回到项目根目录
+        Set-Location $env:GITHUB_WORKSPACE
+        Write-Host "当前工作目录: $(Get-Location)"
+        
+        # 检查CMakeLists.txt是否存在
+        if (Test-Path "CMakeLists.txt") {
+          Write-Host "✓ 找到 CMakeLists.txt"
+        } else {
+          Write-Host "❌ 未找到 CMakeLists.txt，列出当前目录内容:"
+          Get-ChildItem
+        }
+        
         # 创建构建目录
         New-Item -ItemType Directory -Force -Path build
         Set-Location build
@@ -392,8 +407,17 @@ jobs:
         $pythonExe = (Get-Command python).Source
         Write-Host "配置 CMake..."
         Write-Host "Python 可执行文件: $pythonExe"
-        Write-Host "GCC 路径: $(Get-Command gcc).Source"
-        Write-Host "G++ 路径: $(Get-Command g++).Source"
+        
+        try {
+          $gccPath = (Get-Command gcc).Source
+          $gppPath = (Get-Command g++).Source
+          Write-Host "GCC 路径: $gccPath"
+          Write-Host "G++ 路径: $gppPath"
+        } catch {
+          Write-Host "❌ 无法找到GCC编译器"
+          Write-Host "当前 PATH: $env:PATH"
+          exit 1
+        }
         
         cmake .. `
           -G "MinGW Makefiles" `
