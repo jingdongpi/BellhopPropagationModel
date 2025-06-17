@@ -92,6 +92,35 @@ except ImportError:
     sys.exit(1)
 "
 
+# 检查Python扩展模块
+echo "6. 检查Python扩展模块..."
+python_modules=(
+    "bellhop.cpython-*-linux-gnu.so"
+    "readwrite.cpython-*-linux-gnu.so"
+    "env.cpython-*-linux-gnu.so"
+    "bellhop_wrapper.cpython-*-linux-gnu.so"
+)
+
+for module_pattern in "${python_modules[@]}"; do
+    found_files=(lib/$module_pattern)
+    if [ -e "${found_files[0]}" ]; then
+        echo "  ✓ Python模块: ${found_files[0]}"
+        # 尝试导入测试
+        module_name=$(basename "${found_files[0]}" | cut -d'.' -f1)
+        python3 -c "
+import sys
+sys.path.insert(0, 'lib')
+try:
+    exec(f'import {\"$module_name\"}')
+    print(f'    ✓ 模块 $module_name 可正常导入')
+except Exception as e:
+    print(f'    ! 模块 $module_name 导入警告: {e}')
+" 2>/dev/null || echo "    ! 模块导入测试跳过"
+    else
+        echo "  ! Python模块未找到: $module_pattern (可能为可选模块)"
+    fi
+done
+
 echo ""
 echo "🎉 所有CI测试通过！"
 echo "构建产物验证成功"

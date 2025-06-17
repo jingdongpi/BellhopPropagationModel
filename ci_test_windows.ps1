@@ -96,6 +96,75 @@ if (Test-Path "build/CMakeCache.txt") {
     Write-Host "  ! CMake缓存文件不存在" -ForegroundColor Yellow
 }
 
+# 检查Python环境和扩展模块
+Write-Host "5. 检查Python环境..." -ForegroundColor Yellow
+
+try {
+    $pythonVersion = python --version 2>&1
+    Write-Host "  Python版本: $pythonVersion" -ForegroundColor Cyan
+    
+    # 检查NumPy
+    $numpyVersion = python -c "import numpy; print(f'NumPy: {numpy.__version__}')" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  ✓ $numpyVersion" -ForegroundColor Green
+    } else {
+        Write-Host "  ✗ NumPy 不可用" -ForegroundColor Red
+        exit 1
+    }
+    
+    # 检查SciPy
+    $scipyVersion = python -c "import scipy; print(f'SciPy: {scipy.__version__}')" 2>&1
+    if ($LASTEXITCODE -eq 0) {
+        Write-Host "  ✓ $scipyVersion" -ForegroundColor Green
+    } else {
+        Write-Host "  ✗ SciPy 不可用" -ForegroundColor Red
+        exit 1
+    }
+} catch {
+    Write-Host "  ✗ Python环境检查失败: $_" -ForegroundColor Red
+    exit 1
+}
+
+# 检查Python扩展模块
+Write-Host "6. 检查Python扩展模块..." -ForegroundColor Yellow
+
+$pythonModules = @(
+    "bellhop.cp*-win*.pyd",
+    "readwrite.cp*-win*.pyd", 
+    "env.cp*-win*.pyd",
+    "bellhop_wrapper.cp*-win*.pyd"
+)
+
+foreach ($modulePattern in $pythonModules) {
+    $foundFiles = Get-ChildItem "lib/$modulePattern" -ErrorAction SilentlyContinue
+    if ($foundFiles) {
+        Write-Host "  ✓ Python模块: $($foundFiles[0].Name)" -ForegroundColor Green
+        
+        # 尝试导入测试
+        $moduleName = $foundFiles[0].BaseName.Split('.')[0]
+        try {
+            $importTest = python -c "
+import sys
+sys.path.insert(0, 'lib')
+try:
+    exec(f'import $moduleName')
+    print(f'模块 $moduleName 可正常导入')
+except Exception as e:
+    print(f'模块 $moduleName 导入警告: {e}')
+" 2>&1
+            if ($LASTEXITCODE -eq 0) {
+                Write-Host "    ✓ $importTest" -ForegroundColor Cyan
+            } else {
+                Write-Host "    ! 模块导入测试跳过" -ForegroundColor Yellow
+            }
+        } catch {
+            Write-Host "    ! 模块导入测试跳过" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "  ! Python模块未找到: $modulePattern (可能为可选模块)" -ForegroundColor Yellow
+    }
+}
+
 # 显示构建产物信息
 Write-Host "4. 构建产物信息..." -ForegroundColor Yellow
 

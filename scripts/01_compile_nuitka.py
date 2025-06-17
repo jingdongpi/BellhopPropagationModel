@@ -101,7 +101,7 @@ def compile_all_modules(project_root, force=False):
     
     # 1. 编译 python_core 模块
     print("\n=== 检查核心模块 ===")
-    core_modules = ["bellhop.py", "readwrite.py", "env.py", "config.py", "project.py"]
+    core_modules = ["bellhop.py", "readwrite.py", "env.py", "project.py"]
     
     for module in core_modules:
         module_path = python_core_dir / module
