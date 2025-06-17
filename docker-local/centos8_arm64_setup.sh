@@ -3,8 +3,13 @@
 set -ex
 
 # 替换软件源（CentOS 8 已EOL）
+echo "配置 CentOS 8 软件源..."
 sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* || true
 sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-* || true
+
+# 清理缓存并更新
+dnf clean all || true
+dnf makecache || true
 
 # 安装基础工具
 dnf update -y
@@ -17,17 +22,21 @@ PYTHON_VERSION=${1:-3.9}
 echo "安装 Python $PYTHON_VERSION..."
 
 if [[ "$PYTHON_VERSION" == "3.8" ]]; then
+  echo "安装 Python 3.8 系统包..."
   dnf install -y python38 python38-devel python38-pip
   ln -sf /usr/bin/python3.8 /usr/local/bin/python
+  ln -sf /usr/bin/pip3.8 /usr/local/bin/pip || true
 elif [[ "$PYTHON_VERSION" == "3.9" ]]; then
+  echo "安装 Python 3.9 系统包..."
   dnf install -y python39 python39-devel python39-pip
   ln -sf /usr/bin/python3.9 /usr/local/bin/python
+  ln -sf /usr/bin/pip3.9 /usr/local/bin/pip || true
 else
   # 从源码编译其他版本 (3.10, 3.11, 3.12)
   echo "Python $PYTHON_VERSION 需要从源码编译..."
   dnf install -y openssl-devel libffi-devel zlib-devel bzip2-devel \
                  readline-devel sqlite-devel xz-devel tk-devel \
-                 gdbm-devel libuuid-devel
+                 gdbm-devel libuuid-devel ncurses-devel
   
   # 选择合适的下载版本
   case $PYTHON_VERSION in
@@ -46,13 +55,22 @@ else
   esac
   
   cd /tmp
-  wget https://www.python.org/ftp/python/${DOWNLOAD_VERSION}/Python-${DOWNLOAD_VERSION}.tgz
+  echo "下载 Python ${DOWNLOAD_VERSION}..."
+  wget --timeout=30 --tries=3 https://www.python.org/ftp/python/${DOWNLOAD_VERSION}/Python-${DOWNLOAD_VERSION}.tgz
   tar xzf Python-${DOWNLOAD_VERSION}.tgz
   cd Python-${DOWNLOAD_VERSION}
-  ./configure --enable-optimizations --prefix=/usr/local
+  
+  echo "配置并编译 Python..."
+  ./configure --enable-optimizations --prefix=/usr/local --enable-shared
   make -j$(nproc)
   make altinstall
+  
+  # 创建符号链接
   ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
+  
+  # 更新动态库路径
+  echo "/usr/local/lib" > /etc/ld.so.conf.d/python.conf
+  ldconfig
 fi
 
 # 确保 pip 可用
@@ -67,9 +85,6 @@ fi
 echo "验证 Python 安装..."
 python --version
 python -c "import sys; print(f'Python executable: {sys.executable}')"
-  make altinstall
-  ln -sf /usr/local/bin/python${PYTHON_VERSION} /usr/local/bin/python
-fi
 
 # 安装 Python 依赖
 python -m pip install --upgrade pip
