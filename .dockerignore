@@ -1,0 +1,64 @@
+# Docker 构建忽略文件
+# 排除不必要的文件以加速构建
+
+# Git 相关
+.git/
+.gitignore
+
+# 构建产物
+build/
+dist/
+demo-dist/
+bin/BellhopPropagationModel
+lib/libBellhopPropagationModel.so
+lib/*.cpython-*.so
+lib/*.cp*-win*.pyd
+
+# 旧的构建配置
+.github/workflows-archive/
+
+# 文档和说明
+*.md
+docs/
+
+# 示例和测试数据
+examples/output*.json
+data/tmp/
+data/error_log.txt
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+.pytest_cache/
+
+# 开发工具
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# 系统文件
+.DS_Store
+Thumbs.db
+
+# 日志文件
+*.log
+
+# 临时文件
+*.tmp
+*.temp
+
+# 压缩包
+*.tar.gz
+*.zip
+*.rar
+
+# 交付包
+BellhopPropagationModel_Delivery/
+BellhopPropagationModel_Release/
+*.tar.gz
