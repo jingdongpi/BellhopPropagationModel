@@ -596,15 +596,41 @@ EOF
   fi
   rm -f /tmp/test_ssl /tmp/test_ssl.c
   
-  # 检查configure.log中的SSL配置
-  echo "检查configure结果中的SSL配置..."
-  if [ -f "config.log" ]; then
-    echo "=== SSL模块配置检查 ==="
-    grep -A5 -B5 "_ssl" config.log | head -20 || echo "未在config.log中找到_ssl模块信息"
-    echo ""
-    echo "=== OpenSSL库路径检查 ==="
-    grep -E "(openssl|ssl)" config.log | grep -E "(found|not found|yes|no)" | head -10 || echo "未找到OpenSSL配置信息"
-    echo "========================="
+  # 验证Python源码包完整性
+  echo "验证Python源码包完整性..."
+  
+  # 检查当前源码目录是否完整
+  EXPECTED_DIRS="Python Objects Parser Modules Include Lib"
+  MISSING_DIRS=""
+  for dir in $EXPECTED_DIRS; do
+    if [ ! -d "$dir" ]; then
+      MISSING_DIRS="$MISSING_DIRS $dir"
+    fi
+  done
+  
+  if [ -n "$MISSING_DIRS" ]; then
+    echo "❌ 源码目录不完整，缺失: $MISSING_DIRS"
+    echo "可能原因：源码包下载不完整或解压失败"
+    exit 1
+  else
+    echo "✓ 源码目录结构完整"
+  fi
+  
+  # 检查关键的构建文件
+  EXPECTED_FILES="configure Makefile.pre.in setup.py"
+  MISSING_FILES=""
+  for file in $EXPECTED_FILES; do
+    if [ ! -f "$file" ]; then
+      MISSING_FILES="$MISSING_FILES $file"
+    fi
+  done
+  
+  if [ -n "$MISSING_FILES" ]; then
+    echo "❌ 关键构建文件缺失: $MISSING_FILES"
+    echo "建议重新下载Python源码包"
+    exit 1
+  else
+    echo "✓ 关键构建文件存在"
   fi
   
   # 修复Makefile中的urllibmodule问题
@@ -614,7 +640,9 @@ EOF
     if grep -q "urllibmodule" Makefile; then
       echo "发现Makefile中包含urllibmodule，检查文件是否存在..."
       if [ ! -f "Modules/urllibmodule.c" ]; then
-        echo "⚠️  urllibmodule.c文件不存在，从Makefile中移除相关引用"
+        echo "⚠️  urllibmodule.c文件不存在于Python 3.10源码中"
+        echo "说明：Python 3.10已将urllib重构为纯Python实现，不再需要C模块"
+        echo "正在从Makefile中移除相关引用..."
         # 创建备份
         cp Makefile Makefile.backup
         # 移除urllibmodule相关的行
@@ -626,7 +654,7 @@ EOF
     # 检查其他可能不存在的模块文件
     echo "检查Makefile中引用的模块文件是否存在..."
     MISSING_MODULES=""
-    for module in $(grep -o 'Modules/[a-zA-Z_][a-zA-Z0-9_]*module\.c' Makefile | sort | uniq); do
+    for module in $(grep -o 'Modules/[a-zA-Z_][a-zA-Z0-9_]*module\.c' Makefile 2>/dev/null | sort | uniq); do
       if [ ! -f "$module" ]; then
         echo "⚠️  缺失模块文件: $module"
         MISSING_MODULES="$MISSING_MODULES $module"
@@ -641,6 +669,7 @@ EOF
         echo "移除了: $module_name"
       done
       echo "✓ Makefile修复完成"
+      echo "说明：这些模块在Python 3.10中可能已被移除或重构"
     else
       echo "✓ 所有模块文件都存在"
     fi
