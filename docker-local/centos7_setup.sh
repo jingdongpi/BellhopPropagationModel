@@ -528,7 +528,9 @@ EOF
     --with-ssl-default-suites=openssl \
     $OPENSSL_CONFIG_ARGS \
     --enable-optimizations \
-    --disable-test-modules 2>&1 | tee configure.log
+    --disable-test-modules \
+    --without-dtrace \
+    --without-doc-strings 2>&1 | tee configure.log
   
   # 检查configure输出中的SSL相关信息
   echo "检查configure结果中的SSL支持..."
@@ -603,6 +605,45 @@ EOF
     echo "=== OpenSSL库路径检查 ==="
     grep -E "(openssl|ssl)" config.log | grep -E "(found|not found|yes|no)" | head -10 || echo "未找到OpenSSL配置信息"
     echo "========================="
+  fi
+  
+  # 修复Makefile中的urllibmodule问题
+  echo "修复Makefile中的模块问题..."
+  if [ -f "Makefile" ]; then
+    # 检查是否存在urllibmodule相关的问题
+    if grep -q "urllibmodule" Makefile; then
+      echo "发现Makefile中包含urllibmodule，检查文件是否存在..."
+      if [ ! -f "Modules/urllibmodule.c" ]; then
+        echo "⚠️  urllibmodule.c文件不存在，从Makefile中移除相关引用"
+        # 创建备份
+        cp Makefile Makefile.backup
+        # 移除urllibmodule相关的行
+        sed -i '/urllibmodule/d' Makefile
+        echo "✓ 已从Makefile中移除urllibmodule引用"
+      fi
+    fi
+    
+    # 检查其他可能不存在的模块文件
+    echo "检查Makefile中引用的模块文件是否存在..."
+    MISSING_MODULES=""
+    for module in $(grep -o 'Modules/[a-zA-Z_][a-zA-Z0-9_]*module\.c' Makefile | sort | uniq); do
+      if [ ! -f "$module" ]; then
+        echo "⚠️  缺失模块文件: $module"
+        MISSING_MODULES="$MISSING_MODULES $module"
+      fi
+    done
+    
+    if [ -n "$MISSING_MODULES" ]; then
+      echo "从Makefile中移除缺失的模块..."
+      for module in $MISSING_MODULES; do
+        module_name=$(basename "$module" .c)
+        sed -i "/${module_name}/d" Makefile
+        echo "移除了: $module_name"
+      done
+      echo "✓ Makefile修复完成"
+    else
+      echo "✓ 所有模块文件都存在"
+    fi
   fi
   
   # 先尝试正常编译
@@ -752,7 +793,9 @@ EOF
       --enable-loadable-sqlite-extensions \
       --with-ssl-default-suites=openssl \
       $OPENSSL_CONFIG_ARGS \
-      --disable-test-modules 2>&1 | tee configure_no_opt.log
+      --disable-test-modules \
+      --without-dtrace \
+      --without-doc-strings 2>&1 | tee configure_no_opt.log
     
     # 尝试简单编译
     if make -j1 2>&1 | tee make_no_opt.log; then
