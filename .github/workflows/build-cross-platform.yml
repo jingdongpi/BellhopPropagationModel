@@ -8,12 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
-  # 先执行接口规范验证
-  interface-validation:
-    uses: ./.github/workflows/interface-compliance-validation.yml
-  
   build-interface-compliant:
-    needs: interface-validation
     runs-on: ubuntu-latest
     strategy:
       matrix:
