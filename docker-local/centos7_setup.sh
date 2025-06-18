@@ -555,6 +555,71 @@ EOF
     echo "⚠️  Configure可能未检测到正确的OpenSSL路径"
   fi
   
+  # 【关键修复】检查并修复configure后生成的Makefile
+  echo "检查configure是否成功生成了Makefile..."
+  if [ ! -f "Makefile" ]; then
+    echo "❌ Configure没有生成Makefile，可能配置失败"
+    echo "查看configure日志的最后部分："
+    tail -20 configure.log
+    exit 1
+  fi
+  
+  echo "修复Makefile中Python 3.10不兼容的模块引用..."
+  
+  # 创建Makefile备份
+  cp Makefile Makefile.backup.$(date +%s)
+  
+  # Python 3.10中已移除或重构的模块列表
+  REMOVED_MODULES="urllibmodule urlopen urllib2module"
+  
+  # 检查并移除这些已知的问题模块
+  for module in $REMOVED_MODULES; do
+    if grep -q "$module" Makefile; then
+      echo "发现并移除已过时的模块: $module"
+      sed -i "/${module}/d" Makefile
+    fi
+  done
+  
+  # 通用检查：查找Makefile中引用但实际不存在的.c文件
+  echo "检查Makefile中引用的所有模块文件是否存在..."
+  MISSING_MODULES=""
+  
+  # 提取所有Modules/xxxmodule.c引用
+  for module_path in $(grep -o 'Modules/[a-zA-Z_][a-zA-Z0-9_]*module\.c' Makefile 2>/dev/null | sort | uniq); do
+    if [ ! -f "$module_path" ]; then
+      echo "⚠️  缺失模块文件: $module_path"
+      module_name=$(basename "$module_path" .c)
+      MISSING_MODULES="$MISSING_MODULES $module_name"
+      
+      # 从Makefile中移除这个模块的所有引用
+      echo "从Makefile中移除 $module_name 的所有引用..."
+      sed -i "/${module_name}/d" Makefile
+    fi
+  done
+  
+  if [ -n "$MISSING_MODULES" ]; then
+    echo "✓ 已从Makefile中移除缺失的模块:$MISSING_MODULES"
+    echo "说明：这些模块在Python 3.10中已被移除、重构或重命名"
+  else
+    echo "✓ 所有引用的模块文件都存在"
+  fi
+  
+  # 验证修复结果
+  echo "验证Makefile修复结果..."
+  REMAINING_MISSING=0
+  for module_path in $(grep -o 'Modules/[a-zA-Z_][a-zA-Z0-9_]*module\.c' Makefile 2>/dev/null); do
+    if [ ! -f "$module_path" ]; then
+      echo "❌ 仍然引用缺失文件: $module_path"
+      REMAINING_MISSING=$((REMAINING_MISSING + 1))
+    fi
+  done
+  
+  if [ $REMAINING_MISSING -eq 0 ]; then
+    echo "✓ Makefile修复完成，所有引用的文件都存在"
+  else
+    echo "⚠️  仍有 $REMAINING_MISSING 个缺失文件引用，可能导致编译失败"
+  fi
+  
   echo "开始编译Python 3.10（使用OpenSSL $OPENSSL_PREFIX）..."
   
   # 记录编译过程详细信息
@@ -633,48 +698,6 @@ EOF
     echo "✓ 关键构建文件存在"
   fi
   
-  # 修复Makefile中的urllibmodule问题
-  echo "修复Makefile中的模块问题..."
-  if [ -f "Makefile" ]; then
-    # 检查是否存在urllibmodule相关的问题
-    if grep -q "urllibmodule" Makefile; then
-      echo "发现Makefile中包含urllibmodule，检查文件是否存在..."
-      if [ ! -f "Modules/urllibmodule.c" ]; then
-        echo "⚠️  urllibmodule.c文件不存在于Python 3.10源码中"
-        echo "说明：Python 3.10已将urllib重构为纯Python实现，不再需要C模块"
-        echo "正在从Makefile中移除相关引用..."
-        # 创建备份
-        cp Makefile Makefile.backup
-        # 移除urllibmodule相关的行
-        sed -i '/urllibmodule/d' Makefile
-        echo "✓ 已从Makefile中移除urllibmodule引用"
-      fi
-    fi
-    
-    # 检查其他可能不存在的模块文件
-    echo "检查Makefile中引用的模块文件是否存在..."
-    MISSING_MODULES=""
-    for module in $(grep -o 'Modules/[a-zA-Z_][a-zA-Z0-9_]*module\.c' Makefile 2>/dev/null | sort | uniq); do
-      if [ ! -f "$module" ]; then
-        echo "⚠️  缺失模块文件: $module"
-        MISSING_MODULES="$MISSING_MODULES $module"
-      fi
-    done
-    
-    if [ -n "$MISSING_MODULES" ]; then
-      echo "从Makefile中移除缺失的模块..."
-      for module in $MISSING_MODULES; do
-        module_name=$(basename "$module" .c)
-        sed -i "/${module_name}/d" Makefile
-        echo "移除了: $module_name"
-      done
-      echo "✓ Makefile修复完成"
-      echo "说明：这些模块在Python 3.10中可能已被移除或重构"
-    else
-      echo "✓ 所有模块文件都存在"
-    fi
-  fi
-  
   # 先尝试正常编译
   echo "开始编译Python 3.10..."
   COMPILE_SUCCESS=false
@@ -732,8 +755,49 @@ EOF
     tail -50 make.log || true
     echo "==============================="
     
-    echo "尝试单线程编译..."
-    make clean
+    # 检查是否是缺失模块文件导致的并行编译失败
+    if grep -q "No rule to make target.*module\.c" make.log; then
+      echo "发现缺失模块文件错误，先修复Makefile再重试..."
+      
+      # 提取所有导致错误的模块文件
+      FAILED_MODULES=$(grep "No rule to make target.*module\.c" make.log | sed -n "s/.*target '\([^']*\)'.*/\1/p" | sort | uniq)
+      
+      if [ -n "$FAILED_MODULES" ]; then
+        echo "发现导致并行编译失败的缺失模块文件:"
+        echo "$FAILED_MODULES"
+        
+        # 从Makefile中移除这些模块
+        for module_path in $FAILED_MODULES; do
+          module_name=$(basename "$module_path" .c)
+          echo "从Makefile中移除: $module_name"
+          sed -i "/${module_name}/d" Makefile
+        done
+        
+        echo "✓ 已修复Makefile，重新尝试并行编译..."
+        make clean
+        
+        # 重新尝试并行编译
+        if make -j2 2>&1 | tee make_parallel_fixed.log; then
+          echo "✓ 修复后并行编译成功"
+          
+          # 检查是否生成了可执行文件
+          if [ -x "./python" ] || [ -x "./python3" ] || [ -x "./python3.10" ]; then
+            echo "✓ 修复后成功生成了Python可执行文件"
+            COMPILE_SUCCESS=true
+          else
+            echo "⚠️  编译完成但未生成可执行文件"
+            COMPILE_SUCCESS=false
+          fi
+        else
+          echo "修复后并行编译仍然失败，尝试单线程编译..."
+        fi
+      fi
+    fi
+    
+    # 如果并行编译（包括修复后的）仍然失败，尝试单线程编译
+    if [ "$COMPILE_SUCCESS" != "true" ]; then
+      echo "尝试单线程编译..."
+      make clean
     if make -j1 2>&1 | tee make_single.log; then
       echo "✓ 单线程编译过程完成，检查是否生成了可执行文件..."
       
@@ -756,14 +820,59 @@ EOF
       echo "=== 单线程编译SSL错误 ==="
       grep -i "ssl\|_ssl\|error.*ssl" make_single.log | head -20 || true
       echo "========================="
-      tail -50 make_single.log || true
-      echo "尝试忽略错误继续编译..."
-      if make -k 2>&1 | tee make_continue.log; then
-        echo "⚠️  忽略错误编译完成，可能存在问题..."
-        COMPILE_SUCCESS=partial
-      else
-        echo "❌ 所有编译尝试都失败"
-        COMPILE_SUCCESS=false
+      
+      # 检查是否是缺失模块文件导致的错误
+      echo "检查是否是缺失模块文件导致的编译失败..."
+      if grep -q "No rule to make target.*module\.c" make_single.log; then
+        echo "发现缺失模块文件错误，尝试修复Makefile..."
+        
+        # 提取所有导致错误的模块文件
+        FAILED_MODULES=$(grep "No rule to make target.*module\.c" make_single.log | sed -n "s/.*target '\([^']*\)'.*/\1/p")
+        
+        if [ -n "$FAILED_MODULES" ]; then
+          echo "发现导致编译失败的缺失模块文件:"
+          echo "$FAILED_MODULES"
+          
+          # 从Makefile中移除这些模块
+          for module_path in $FAILED_MODULES; do
+            module_name=$(basename "$module_path" .c)
+            echo "从Makefile中移除: $module_name"
+            sed -i "/${module_name}/d" Makefile
+          done
+          
+          echo "✓ 已修复Makefile，重新尝试编译..."
+          make clean
+          
+          # 重新尝试单线程编译
+          if make -j1 2>&1 | tee make_fixed.log; then
+            echo "✓ 修复后编译成功"
+            
+            # 检查是否生成了可执行文件
+            if [ -x "./python" ] || [ -x "./python3" ] || [ -x "./python3.10" ]; then
+              echo "✓ 修复后成功生成了Python可执行文件"
+              COMPILE_SUCCESS=true
+            else
+              echo "⚠️  编译完成但未生成可执行文件"
+              COMPILE_SUCCESS=false
+            fi
+          else
+            echo "❌ 修复后编译仍然失败"
+            tail -30 make_fixed.log
+            COMPILE_SUCCESS=false
+          fi
+        fi
+      fi
+      
+      if [ "$COMPILE_SUCCESS" != "true" ]; then
+        tail -50 make_single.log || true
+        echo "尝试忽略错误继续编译..."
+        if make -k 2>&1 | tee make_continue.log; then
+          echo "⚠️  忽略错误编译完成，可能存在问题..."
+          COMPILE_SUCCESS=partial
+        else
+          echo "❌ 所有编译尝试都失败"
+          COMPILE_SUCCESS=false
+        fi
       fi
     fi
   fi
@@ -1054,9 +1163,6 @@ EOF
     echo "❌ Python 3.10安装失败"
     exit 1
   fi
-else
-  # 从源码编译其他版本 (3.10, 3.11, 3.12)
-  echo "Python $PYTHON_VERSION 需要从源码编译..."
   yum install -y openssl-devel libffi-devel zlib-devel bzip2-devel \
                  readline-devel sqlite-devel xz-devel tk-devel \
                  gdbm-devel libuuid-devel
@@ -1340,6 +1446,8 @@ $PIP_CMD install nuitka wheel setuptools $USE_TRUSTED_HOSTS || {
     echo "⚠️  基本依赖安装失败，可能影响构建..."
   }
 }
+
+fi
 
 # 根据Python版本安装科学计算库
 echo "安装科学计算库..."

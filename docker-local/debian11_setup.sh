@@ -73,22 +73,35 @@ else
   ldconfig
 fi
 
-# 确保 pip 可用
+# 确保 pip 可用（带容错）
 if ! command -v pip &> /dev/null; then
   echo "安装 pip..."
   # 根据 Python 版本选择合适的 pip 安装脚本
   case $PYTHON_VERSION in
     3.8)
       echo "使用 Python 3.8 专用的 pip 安装脚本..."
-      curl https://bootstrap.pypa.io/pip/3.8/get-pip.py -o get-pip.py
+      curl https://bootstrap.pypa.io/pip/3.8/get-pip.py -o get-pip.py || {
+        echo "下载失败，尝试apt安装pip..."
+        apt-get install -y python3-pip
+        ln -sf /usr/bin/pip3 /usr/local/bin/pip 2>/dev/null || true
+        return 0
+      }
       ;;
     *)
       echo "使用最新的 pip 安装脚本..."
-      curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py
+      curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py || {
+        echo "下载失败，尝试apt安装pip..."
+        apt-get install -y python3-pip
+        ln -sf /usr/bin/pip3 /usr/local/bin/pip 2>/dev/null || true
+        return 0
+      }
       ;;
   esac
-  python get-pip.py
-  rm get-pip.py
+  
+  if [ -f get-pip.py ]; then
+    python get-pip.py
+    rm get-pip.py
+  fi
 fi
 
 # 验证 Python 安装
