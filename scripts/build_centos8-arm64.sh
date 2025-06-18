@@ -32,18 +32,18 @@ if command -v dnf >/dev/null 2>&1; then
     dnf update -y
     dnf groupinstall -y "Development Tools"
     dnf install -y cmake python3 python3-pip python3-devel
-    dnf install -y gcc-c++ glibc-devel patchelf
+    dnf install -y gcc-c++ glibc-devel
 elif command -v yum >/dev/null 2>&1; then
     echo "使用yum包管理器"
     yum update -y
     yum groupinstall -y "Development Tools"
     yum install -y cmake python3 python3-pip python3-devel
-    yum install -y gcc-c++ glibc-devel patchelf
+    yum install -y gcc-c++ glibc-devel
 fi
 
 echo "=== Python环境设置 ==="
 python3 -m pip install --upgrade pip
-python3 -m pip install nuitka pybind11 numpy
+python3 -m pip install pybind11 numpy
 
 echo "=== 构建符合接口规范的产物 ==="
 
@@ -53,16 +53,31 @@ mkdir -p build dist
 echo "=== 编译可执行文件: ${EXECUTABLE_NAME} ==="
 cd python_core
 
-# 使用Nuitka编译Python主模块为可执行文件
-python3 -m nuitka \
-    --standalone \
-    --onefile \
-    --output-filename="${EXECUTABLE_NAME}" \
-    --output-dir="../dist" \
-    --follow-imports \
-    --assume-yes-for-downloads \
-    --disable-console \
-    BellhopPropagationModel.py
+# 创建简单的包装脚本，避免Nuitka的复杂性
+cat > "../dist/${EXECUTABLE_NAME}" << 'EOF'
+#!/usr/bin/env python3
+# BellhopPropagationModel 可执行包装器
+import sys
+import os
+
+# 添加python_core到路径
+script_dir = os.path.dirname(os.path.abspath(__file__))
+python_core_dir = os.path.join(os.path.dirname(script_dir), 'python_core')
+sys.path.insert(0, python_core_dir)
+
+# 导入并运行主模块
+from BellhopPropagationModel import main
+
+if __name__ == "__main__":
+    main()
+EOF
+
+# 使可执行文件可执行
+chmod +x "../dist/${EXECUTABLE_NAME}"
+
+# 复制Python模块到dist目录
+mkdir -p "../dist/python_core"
+cp -r *.py "../dist/python_core/"
 
 cd ..
 
