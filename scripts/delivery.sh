@@ -20,6 +20,23 @@ log_success() {
     echo "✅ $1"
 }
 
+echo "📖 更多使用方法:"
+echo "  - 查看项目文档: cat README.md"
+echo "  - 环境变量自助配置: ./python_env_setup.sh"
+echo "  - 测试动态库示例: cd examples && ./run_example.sh"
+echo "  - 运行C++可执行文件: ./bin/BellhopPropagationModel examples/input.json output.json"
+echo
+echo "💡 如果遇到库找不到的问题，请运行: ./python_env_setup.sh"
+
+# 日志函数
+log_info() {
+    echo "ℹ️  $1"
+}
+
+log_success() {
+    echo "✅ $1"
+}
+
 log_warning() {
     echo "⚠️  $1"
 }
@@ -69,8 +86,8 @@ create_delivery_structure() {
     
     cd "$DELIVERY_DIR"
     
-    # 创建目录结构
-    mkdir -p {bin,lib,include,examples,scripts}
+    # 创建目录结构 - 简化版，不包含scripts目录
+    mkdir -p {bin,lib,include,examples}
     
     log_success "交付包目录结构创建完成"
 }
@@ -161,39 +178,33 @@ copy_delivery_readme() {
 
 ## 快速开始
 
-1. **必须设置环境变量** (动态库运行必需):
-   ```bash
-   export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
-   ```
-
-2. 运行快速开始脚本:
+1. **运行快速开始脚本**（推荐）:
    ```bash
    ./quick_start.sh
    ```
 
-3. 或运行动态库示例:
+2. **或手动设置环境变量后运行**:
+   ```bash
+   # 设置动态库路径（必需）
+   export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH
+   
+   # 运行计算
+   ./bin/BellhopPropagationModel examples/input.json output.json
+   ```
+
+3. **测试动态库示例**:
    ```bash
    cd examples
    ./run_example.sh
-   ```
-
-4. 或直接运行可执行文件:
-   ```bash
-   ./bin/BellhopPropagationModel examples/input.json output.json
    ```
 
 ## 环境变量自助配置
 
 如果遇到Python库找不到的问题，可以使用提供的环境配置脚本：
 
-### 使用python_env_setup.sh脚本
 ```bash
-# 进入项目目录
-cd /path/to/BellhopPropagationModel
-
 # 运行环境配置脚本
-chmod +x scripts/python_env_setup.sh
-./scripts/python_env_setup.sh
+./python_env_setup.sh
 
 # 脚本会自动：
 # 1. 检测系统中的Python安装
@@ -227,6 +238,29 @@ chmod +x setup_env.sh
 source setup_env.sh
 ```
 
+## 使用方法
+
+### 1. 快速开始（推荐）
+```bash
+./quick_start.sh
+```
+
+### 2. 直接运行可执行文件
+```bash
+./bin/BellhopPropagationModel examples/input.json output.json
+```
+
+### 3. 测试动态库示例
+```bash
+cd examples
+./run_example.sh
+```
+
+### 4. 环境问题自助修复
+```bash
+./python_env_setup.sh
+```
+
 ## 常见问题解决
 
 ### 找不到动态库
@@ -235,14 +269,15 @@ source setup_env.sh
 **解决**: 
 1. 确保在项目根目录下运行
 2. 设置LD_LIBRARY_PATH：`export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH`
-3. 或使用环境配置脚本：`./scripts/python_env_setup.sh`
+3. 或运行快速开始脚本：`./quick_start.sh`
+4. 或使用环境配置脚本：`./python_env_setup.sh`
 
 ### Python模块导入失败
 **错误**: `ModuleNotFoundError: No module named 'bellhop_wrapper'`
 
 **解决**:
 1. 设置PYTHONPATH：`export PYTHONPATH=$PWD/lib:$PYTHONPATH`
-2. 或使用环境配置脚本：`./scripts/python_env_setup.sh`
+2. 或使用环境配置脚本：`./python_env_setup.sh`
 
 ### 权限问题
 **错误**: `Permission denied`
@@ -253,14 +288,33 @@ chmod +x bin/BellhopPropagationModel
 chmod +x bin/bellhop
 chmod +x quick_start.sh
 chmod +x examples/run_example.sh
-chmod +x scripts/python_env_setup.sh
+chmod +x python_env_setup.sh
 ```
+
+## 文件说明
+
+### 核心文件
+- `bin/BellhopPropagationModel` - 主要可执行文件
+- `bin/bellhop` - Bellhop声学传播计算引擎
+- `lib/libBellhopPropagationModel.so` - 动态库
+- `lib/*.cpython-*.so` - Python扩展模块
+
+### 脚本文件
+- `quick_start.sh` - 快速开始脚本，自动设置环境并运行示例
+- `python_env_setup.sh` - 环境变量自助配置脚本
+- `examples/run_example.sh` - 动态库使用示例脚本
+
+### 示例文件
+- `examples/input.json` - 输入参数示例
+- `examples/use_library_example.cpp` - 动态库使用示例代码
 
 ## 重要说明
 
 ⚠️  **必须设置 `LD_LIBRARY_PATH`**：项目使用自定义动态库，系统无法在标准路径中找到，因此必须设置此环境变量指向 `lib/` 目录。
 
-💡 **推荐使用环境配置脚本**：`scripts/python_env_setup.sh` 会自动检测并配置所有必需的环境变量，避免手动配置错误。
+💡 **推荐使用快速开始脚本**：`./quick_start.sh` 会自动配置环境变量并运行示例。
+
+💡 **推荐使用环境配置脚本**：`./python_env_setup.sh` 会自动检测并配置所有必需的环境变量，避免手动配置错误。
 
 ## 系统要求
 
@@ -271,48 +325,39 @@ chmod +x scripts/python_env_setup.sh
 ## 支持
 
 如果遇到问题：
-1. 首先尝试运行环境配置脚本：`./scripts/python_env_setup.sh`
-2. 检查快速开始脚本的输出：`./quick_start.sh`
-3. 查看详细的脚本说明：`cat scripts/README.md`
+1. 首先尝试运行快速开始脚本：`./quick_start.sh`
+2. 如果有环境变量问题，运行：`./python_env_setup.sh`
+3. 查看examples目录中的示例：`cd examples && ./run_example.sh`
 
 更多详细信息请联系开发团队。
 EOF
         log_warning "已创建简化版 README"
     fi
     
-    # 复制 scripts 文件夹中的 README.md
+    # 复制 scripts 文件夹中的 README.md（如果存在，作为参考）
+    # 注意：实际交付包中不包含scripts目录
     if [ -f "scripts/README.md" ]; then
-        cp "scripts/README.md" "$DELIVERY_DIR/scripts/"
-        log_success "scripts/README.md 已复制到交付包"
-    else
-        log_warning "scripts/README.md 未找到"
+        log_info "scripts/README.md 存在，但不会复制到交付包（简化交付）"
     fi
 }
 
-# 复制脚本文件
-copy_scripts() {
-    log_info "复制脚本文件..."
+# 复制用户脚本文件
+copy_user_scripts() {
+    log_info "复制用户必需的脚本文件..."
     
     cd "$PROJECT_ROOT"
     
-    # 复制Python环境配置脚本
+    # 只复制用户需要的Python环境配置脚本到根目录
     if [ -f "scripts/python_env_setup.sh" ]; then
-        cp scripts/python_env_setup.sh "$DELIVERY_DIR/scripts/"
-        chmod +x "$DELIVERY_DIR/scripts/python_env_setup.sh"
-        log_success "python_env_setup.sh 已复制到 scripts 目录"
+        cp scripts/python_env_setup.sh "$DELIVERY_DIR/"
+        chmod +x "$DELIVERY_DIR/python_env_setup.sh"
+        log_success "python_env_setup.sh 已复制到根目录"
     else
         log_warning "scripts/python_env_setup.sh 未找到"
     fi
     
-    # 复制其他有用的脚本
-    for script in scripts/*.sh; do
-        if [ -f "$script" ] && [ "$(basename "$script")" != "python_env_setup.sh" ]; then
-            cp "$script" "$DELIVERY_DIR/scripts/" 2>/dev/null || true
-            chmod +x "$DELIVERY_DIR/scripts/$(basename "$script")" 2>/dev/null || true
-        fi
-    done
-    
-    log_success "脚本文件复制完成"
+    # 不再复制scripts目录，所有脚本都放在合适的位置
+    log_success "用户脚本文件复制完成"
 }
 
 # 创建部署脚本
@@ -378,7 +423,7 @@ echo "  - 环境变量自助配置: ./scripts/python_env_setup.sh"
 echo "  - 测试动态库示例: cd examples && ./run_example.sh"
 echo "  - 运行C++可执行文件: ./bin/BellhopPropagationModel examples/input.json output.json"
 echo
-echo "💡 如果遇到库找不到的问题，请运行: ./scripts/python_env_setup.sh"
+echo "💡 如果遇到库找不到的问题，请运行: ./python_env_setup.sh"
 EOF
 
     chmod +x "$DELIVERY_DIR/quick_start.sh"
@@ -470,7 +515,7 @@ show_delivery_summary() {
     echo "  2. 进入: cd ${PACKAGE_NAME}"
     echo "  3. 快速开始: ./quick_start.sh"
     echo "  4. 动态库示例: cd examples && ./run_example.sh"
-    echo "  5. 查看说明: cat README.md 和 cat scripts/README.md"
+    echo "  5. 环境配置: ./python_env_setup.sh"
     echo
     echo "✅ 交付完成!"
 }
@@ -485,7 +530,7 @@ main() {
     create_delivery_structure
     copy_core_files
     copy_examples
-    copy_scripts
+    copy_user_scripts
     copy_delivery_readme
     create_deployment_scripts
     generate_version_info
