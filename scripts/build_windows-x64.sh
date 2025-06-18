@@ -26,8 +26,18 @@ export SUCCESS_ERROR_CODE="200"
 export FAILURE_ERROR_CODE="500"
 
 echo "=== Python环境设置 ==="
+# 确保使用MSYS2的Python
+export PATH="/mingw64/bin:$PATH"
+which python
+python --version
+
+echo "=== 安装Python依赖 ==="
 python -m pip install --upgrade pip
 python -m pip install nuitka pybind11 numpy
+
+echo "=== 验证环境 ==="
+python -m nuitka --version
+gcc --version
 
 echo "=== 构建符合接口规范的产物 ==="
 
@@ -41,25 +51,40 @@ cd python_core
 python -m nuitka \
     --standalone \
     --onefile \
-    --output-filename="${EXECUTABLE_NAME}" \
+    --output-filename="${EXECUTABLE_NAME%.exe}" \
     --output-dir="../dist" \
     --follow-imports \
     --assume-yes-for-downloads \
-    --disable-console \
-    --windows-disable-console \
+    --mingw64 \
     BellhopPropagationModel.py
+
+# 确保生成.exe扩展名
+if [ -f "../dist/BellhopPropagationModel" ] && [ ! -f "../dist/BellhopPropagationModel.exe" ]; then
+    mv "../dist/BellhopPropagationModel" "../dist/BellhopPropagationModel.exe"
+fi
 
 cd ..
 
 echo "=== 编译动态链接库: ${LIBRARY_NAME} ==="
 cd wrapper
 
+# 获取Python信息
+PYTHON_VERSION=$(python -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PYTHON_INCLUDE_DIR=$(python -c "from sysconfig import get_path; print(get_path('include'))")
+PYTHON_LIB_DIR=$(python -c "from sysconfig import get_path; print(get_path('stdlib'))" | sed 's/lib\/python.*/lib/')
+
+echo "Python版本: ${PYTHON_VERSION}"
+echo "Python包含目录: ${PYTHON_INCLUDE_DIR}"
+echo "Python库目录: ${PYTHON_LIB_DIR}"
+
 # 编译C++动态链接库，包含SolveBellhopPropagationModel函数
 g++ -shared \
     -o "../dist/${LIBRARY_NAME}" \
     ${HEADER_NAME%.h}.cpp \
     -I../python_core \
-    -lpython3 \
+    -I"${PYTHON_INCLUDE_DIR}" \
+    -L"${PYTHON_LIB_DIR}" \
+    -lpython${PYTHON_VERSION} \
     -O2 \
     -DFUNCTION_NAME="${FUNCTION_NAME}" \
     -DSUCCESS_CODE=${SUCCESS_ERROR_CODE} \

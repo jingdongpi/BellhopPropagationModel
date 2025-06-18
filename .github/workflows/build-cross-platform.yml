@@ -30,9 +30,9 @@ jobs:
             linux_target: "5.4.18"
             description: "国产化Linux ARM64 (Debian 11兼容)"
 
-          # Windows x86-64平台
+          # Windows x86-64平台 (增强兼容性)
           - platform: windows-x64
-            runner: windows-2022
+            runner: windows-2019
             gcc_target: "6.3.0"
             mingw_version: "mingw32"
             description: "Windows x86-64 (MinGW32 6.3.0)"
@@ -58,7 +58,17 @@ jobs:
           mingw-w64-x86_64-cmake
           mingw-w64-x86_64-python
           mingw-w64-x86_64-python-pip
-          mingw-w64-x86_64-nuitka
+
+    - name: Install Nuitka via pip for Windows
+      if: matrix.platform == 'windows-x64'
+      shell: msys2 {0}
+      run: |
+        echo "=== 安装Python构建工具 ==="
+        python -m pip install --upgrade pip
+        python -m pip install nuitka pybind11 numpy
+        echo "=== 验证工具安装 ==="
+        python -m nuitka --version
+        gcc --version
 
     - name: Build Linux Interface Compliant Artifacts
       if: matrix.platform != 'windows-x64'
@@ -164,49 +174,7 @@ jobs:
           exit 1
         fi
         
-        echo '=== Windows接口规范验证通过 ===' \
-          -e TARGET_GCC_VERSION=${{ matrix.gcc_target }} \
-          -e TARGET_GLIBC_VERSION=${{ matrix.glibc_target }} \
-          ${{ matrix.docker_image }} \
-          /bin/bash -c "
-            set -e
-            
-            echo '=== 环境准备 ==='
-            export DEBIAN_FRONTEND=noninteractive
-            
-            echo '=== 执行接口规范构建 ==='
-            chmod +x scripts/build_complete_dual_artifacts.sh
-            chmod +x scripts/build_${{ matrix.platform }}.sh
-            
-            # 使用统一构建脚本
-            ./scripts/build_complete_dual_artifacts.sh ${{ matrix.platform }}
-            
-            echo '=== 验证产物符合接口规范 ==='
-            if [ -f 'dist/BellhopPropagationModel' ]; then
-              echo '✅ 可执行文件: BellhopPropagationModel'
-              file dist/BellhopPropagationModel
-            else
-              echo '❌ 可执行文件缺失'
-              exit 1
-            fi
-            
-            if [ -f 'dist/libBellhopPropagationModel.so' ]; then
-              echo '✅ 动态链接库: libBellhopPropagationModel.so'
-              file dist/libBellhopPropagationModel.so
-            else
-              echo '❌ 动态链接库缺失'
-              exit 1
-            fi
-            
-            if [ -f 'dist/BellhopPropagationModelInterface.h' ]; then
-              echo '✅ 头文件: BellhopPropagationModelInterface.h'
-            else
-              echo '❌ 头文件缺失'
-              exit 1
-            fi
-            
-            echo '=== 接口规范验证通过 ==='
-          "
+        echo '=== Windows接口规范验证通过 ==='
 
     - name: Test Interface Compliance
       run: |
@@ -240,6 +208,7 @@ jobs:
         if-no-files-found: error
 
     - name: Create Interface Compliance Summary
+      if: matrix.platform != 'windows-x64'
       run: |
         echo "## 🎯 接口规范构建摘要 - ${{ matrix.platform }}" >> $GITHUB_STEP_SUMMARY
         echo "**平台**: ${{ matrix.description }}" >> $GITHUB_STEP_SUMMARY  
@@ -249,6 +218,31 @@ jobs:
         echo "### ✅ 接口规范符合性" >> $GITHUB_STEP_SUMMARY
         echo "- 2.1.1 可执行文件: \`BellhopPropagationModel\`" >> $GITHUB_STEP_SUMMARY
         echo "- 2.1.2 动态链接库: \`libBellhopPropagationModel.so\`" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.1.2 计算函数: \`SolveBellhopPropagationModel\`" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.1.2 头文件: \`BellhopPropagationModelInterface.h\`" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.2 标准输入接口: JSON格式" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.3 标准输出接口: JSON格式，错误码200/500" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -d "dist" ]; then
+          echo "### 📦 构建产物" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls -la dist/ >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        fi
+
+    - name: Create Interface Compliance Summary for Windows
+      if: matrix.platform == 'windows-x64'
+      shell: msys2 {0}
+      run: |
+        echo "## 🎯 接口规范构建摘要 - ${{ matrix.platform }}" >> $GITHUB_STEP_SUMMARY
+        echo "**平台**: ${{ matrix.description }}" >> $GITHUB_STEP_SUMMARY  
+        echo "**目标环境**: gcc ${{ matrix.gcc_target }}, MinGW ${{ matrix.mingw_version }}" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "### ✅ 接口规范符合性" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.1.1 可执行文件: \`BellhopPropagationModel.exe\`" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.1.2 动态链接库: \`BellhopPropagationModel.dll\`" >> $GITHUB_STEP_SUMMARY
         echo "- 2.1.2 计算函数: \`SolveBellhopPropagationModel\`" >> $GITHUB_STEP_SUMMARY
         echo "- 2.1.2 头文件: \`BellhopPropagationModelInterface.h\`" >> $GITHUB_STEP_SUMMARY
         echo "- 2.2 标准输入接口: JSON格式" >> $GITHUB_STEP_SUMMARY
@@ -275,7 +269,7 @@ jobs:
         mkdir -p release
         
         # 整理符合接口规范的构建产物
-        for platform in centos8-arm64 debian11-arm64; do
+        for platform in centos8-arm64 debian11-arm64 windows-x64; do
           artifact_name="bellhop-interface-compliant-$platform"
           if [ -d "$artifact_name" ]; then
             mkdir -p "release/$platform"
@@ -322,15 +316,20 @@ jobs:
         - **兼容性**: Debian 11+、Ubuntu 20.04+、深度等国产化系统
         - **特点**: 更新的工具链，更好的性能
         
+        ### windows-x64 (Windows x86-64)
+        - **目标环境**: MinGW32 gcc 6.3.0
+        - **兼容性**: Windows 7+、Windows Server 2008+
+        - **特点**: 无需Python环境，自包含可执行文件
+        
         ## 🚀 产物说明
         
         每个平台目录包含符合规范的完整产物:
         
-        1. **BellhopPropagationModel** - 可执行文件
-           - 支持 `./BellhopPropagationModel` (默认文件)
-           - 支持 `./BellhopPropagationModel input.json output.json` (指定文件)
+        1. **可执行文件** - Linux: `BellhopPropagationModel`, Windows: `BellhopPropagationModel.exe`
+           - 支持默认文件模式 (无参数)
+           - 支持指定文件模式 (支持并行)
         
-        2. **libBellhopPropagationModel.so** - 动态链接库
+        2. **动态链接库** - Linux: `libBellhopPropagationModel.so`, Windows: `BellhopPropagationModel.dll`
            - C++接口: `SolveBellhopPropagationModel(json, outJson)`
            - 错误码: 200成功, 500失败
         
@@ -341,15 +340,14 @@ jobs:
            - 符合接口规范的完整输入格式
         
         5. **测试文件**
-           - `test_executable.sh` - 可执行文件测试
-           - `test_library.cpp` - 动态库测试程序
-           - `compile_test.sh` - 编译测试脚本
+           - Linux: `test_executable.sh`, `compile_test.sh`
+           - Windows: `test_executable.bat`, `compile_test.bat`
         
         ## 📋 使用方法
         
         ### 可执行文件使用
         ```bash
-        # 下载对应平台的产物
+        # Linux平台
         cd centos8-arm64/  # 或 debian11-arm64/
         
         # 方式1: 使用默认文件
@@ -357,6 +355,17 @@ jobs:
         
         # 方式2: 指定文件 (支持并行)
         ./BellhopPropagationModel task1_input.json task1_output.json
+        ```
+        
+        ```cmd
+        # Windows平台
+        cd windows-x64\
+        
+        REM 方式1: 使用默认文件
+        BellhopPropagationModel.exe
+        
+        REM 方式2: 指定文件 (支持并行)
+        BellhopPropagationModel.exe task1_input.json task1_output.json
         ```
         
         ### 动态链接库使用
