@@ -182,15 +182,98 @@ copy_delivery_readme() {
    ./bin/BellhopPropagationModel examples/input.json output.json
    ```
 
+## 环境变量自助配置
+
+如果遇到Python库找不到的问题，可以使用提供的环境配置脚本：
+
+### 使用python_env_setup.sh脚本
+```bash
+# 进入项目目录
+cd /path/to/BellhopPropagationModel
+
+# 运行环境配置脚本
+chmod +x scripts/python_env_setup.sh
+./scripts/python_env_setup.sh
+
+# 脚本会自动：
+# 1. 检测系统中的Python安装
+# 2. 查找项目中的库文件
+# 3. 自动生成环境变量配置
+# 4. 生成setup_env.sh脚本
+
+# 使用生成的环境配置（立即生效）
+source setup_env.sh
+
+# 或者永久配置（添加到shell配置文件）
+echo "source $(pwd)/setup_env.sh" >> ~/.bashrc
+```
+
+### 手动配置环境变量
+如果自动配置脚本无法使用，可以手动设置：
+
+```bash
+# 必需的环境变量
+export LD_LIBRARY_PATH="$PWD/lib:$LD_LIBRARY_PATH"
+export PYTHONPATH="$PWD/lib:$PYTHONPATH"
+export PATH="$PWD:$PATH"
+
+# 保存到文件以便重复使用
+echo 'export LD_LIBRARY_PATH="'$PWD'/lib:$LD_LIBRARY_PATH"' > setup_env.sh
+echo 'export PYTHONPATH="'$PWD'/lib:$PYTHONPATH"' >> setup_env.sh
+echo 'export PATH="'$PWD':$PATH"' >> setup_env.sh
+chmod +x setup_env.sh
+
+# 之后使用
+source setup_env.sh
+```
+
+## 常见问题解决
+
+### 找不到动态库
+**错误**: `error while loading shared libraries: libBellhopPropagationModel.so`
+
+**解决**: 
+1. 确保在项目根目录下运行
+2. 设置LD_LIBRARY_PATH：`export LD_LIBRARY_PATH=$PWD/lib:$LD_LIBRARY_PATH`
+3. 或使用环境配置脚本：`./scripts/python_env_setup.sh`
+
+### Python模块导入失败
+**错误**: `ModuleNotFoundError: No module named 'bellhop_wrapper'`
+
+**解决**:
+1. 设置PYTHONPATH：`export PYTHONPATH=$PWD/lib:$PYTHONPATH`
+2. 或使用环境配置脚本：`./scripts/python_env_setup.sh`
+
+### 权限问题
+**错误**: `Permission denied`
+
+**解决**:
+```bash
+chmod +x bin/BellhopPropagationModel
+chmod +x bin/bellhop
+chmod +x quick_start.sh
+chmod +x examples/run_example.sh
+chmod +x scripts/python_env_setup.sh
+```
+
 ## 重要说明
 
 ⚠️  **必须设置 `LD_LIBRARY_PATH`**：项目使用自定义动态库，系统无法在标准路径中找到，因此必须设置此环境变量指向 `lib/` 目录。
+
+💡 **推荐使用环境配置脚本**：`scripts/python_env_setup.sh` 会自动检测并配置所有必需的环境变量，避免手动配置错误。
 
 ## 系统要求
 
 - Linux 64位
 - Python 3.8+
 - numpy, scipy
+
+## 支持
+
+如果遇到问题：
+1. 首先尝试运行环境配置脚本：`./scripts/python_env_setup.sh`
+2. 检查快速开始脚本的输出：`./quick_start.sh`
+3. 查看详细的脚本说明：`cat scripts/README.md`
 
 更多详细信息请联系开发团队。
 EOF
@@ -204,6 +287,32 @@ EOF
     else
         log_warning "scripts/README.md 未找到"
     fi
+}
+
+# 复制脚本文件
+copy_scripts() {
+    log_info "复制脚本文件..."
+    
+    cd "$PROJECT_ROOT"
+    
+    # 复制Python环境配置脚本
+    if [ -f "scripts/python_env_setup.sh" ]; then
+        cp scripts/python_env_setup.sh "$DELIVERY_DIR/scripts/"
+        chmod +x "$DELIVERY_DIR/scripts/python_env_setup.sh"
+        log_success "python_env_setup.sh 已复制到 scripts 目录"
+    else
+        log_warning "scripts/python_env_setup.sh 未找到"
+    fi
+    
+    # 复制其他有用的脚本
+    for script in scripts/*.sh; do
+        if [ -f "$script" ] && [ "$(basename "$script")" != "python_env_setup.sh" ]; then
+            cp "$script" "$DELIVERY_DIR/scripts/" 2>/dev/null || true
+            chmod +x "$DELIVERY_DIR/scripts/$(basename "$script")" 2>/dev/null || true
+        fi
+    done
+    
+    log_success "脚本文件复制完成"
 }
 
 # 创建部署脚本
@@ -265,8 +374,11 @@ echo
 echo "📖 更多使用方法:"
 echo "  - 查看项目文档: cat README.md"
 echo "  - 查看脚本说明: cat scripts/README.md"
+echo "  - 环境变量自助配置: ./scripts/python_env_setup.sh"
 echo "  - 测试动态库示例: cd examples && ./run_example.sh"
 echo "  - 运行C++可执行文件: ./bin/BellhopPropagationModel examples/input.json output.json"
+echo
+echo "💡 如果遇到库找不到的问题，请运行: ./scripts/python_env_setup.sh"
 EOF
 
     chmod +x "$DELIVERY_DIR/quick_start.sh"
@@ -373,6 +485,7 @@ main() {
     create_delivery_structure
     copy_core_files
     copy_examples
+    copy_scripts
     copy_delivery_readme
     create_deployment_scripts
     generate_version_info
