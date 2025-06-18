@@ -33,12 +33,24 @@ if command -v dnf >/dev/null 2>&1; then
     dnf groupinstall -y "Development Tools"
     dnf install -y cmake python3 python3-pip python3-devel
     dnf install -y gcc-c++ glibc-devel
+    # 安装patchelf (Nuitka standalone依赖)
+    dnf install -y patchelf || (
+        echo "从EPEL安装patchelf..."
+        dnf install -y epel-release
+        dnf install -y patchelf
+    )
 elif command -v yum >/dev/null 2>&1; then
     echo "使用yum包管理器"
     yum update -y
     yum groupinstall -y "Development Tools"
     yum install -y cmake python3 python3-pip python3-devel
     yum install -y gcc-c++ glibc-devel
+    # 安装patchelf (Nuitka standalone依赖)
+    yum install -y patchelf || (
+        echo "从EPEL安装patchelf..."
+        yum install -y epel-release
+        yum install -y patchelf
+    )
 fi
 
 echo "=== Python环境设置 ==="
@@ -63,7 +75,6 @@ echo "使用Nuitka编译自包含二进制..."
 python3 -m nuitka \
     --standalone \
     --onefile \
-    --static-libpython=yes \
     --output-dir="../build" \
     --output-filename="${EXECUTABLE_NAME}" \
     --follow-imports \
@@ -90,7 +101,6 @@ echo "使用Nuitka编译Python模块..."
 python3 -m nuitka \
     --module \
     --standalone \
-    --static-libpython=yes \
     --output-dir="../build" \
     --remove-output \
     BellhopPropagationModel.py

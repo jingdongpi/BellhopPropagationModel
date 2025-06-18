@@ -56,7 +56,6 @@ echo "使用Nuitka编译自包含二进制..."
 python3 -m nuitka \
     --standalone \
     --onefile \
-    --static-libpython=yes \
     --output-dir="../build" \
     --output-filename="${EXECUTABLE_NAME}" \
     --follow-imports \
@@ -83,7 +82,6 @@ echo "使用Nuitka编译Python模块..."
 python3 -m nuitka \
     --module \
     --standalone \
-    --static-libpython=yes \
     --output-dir="../build" \
     --remove-output \
     BellhopPropagationModel.py
