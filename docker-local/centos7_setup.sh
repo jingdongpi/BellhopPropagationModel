@@ -595,10 +595,14 @@ EOF
   rm -f /tmp/test_ssl /tmp/test_ssl.c
   
   # 先尝试正常编译
+  echo "开始编译Python 3.10..."
+  COMPILE_SUCCESS=false
+  
   if make -j2 2>&1 | tee make.log; then
-    echo "✓ Python编译成功"
+    echo "✓ 并行编译完成，检查结果..."
+    COMPILE_SUCCESS=true
   else
-    echo "编译失败，检查错误信息..."
+    echo "并行编译失败，检查错误信息..."
     echo "=== Make错误信息（SSL相关） ==="
     grep -i "ssl\|_ssl\|error.*ssl" make.log | head -20 || true
     echo "================================"
@@ -610,16 +614,46 @@ EOF
     echo "尝试单线程编译..."
     make clean
     if make -j1 2>&1 | tee make_single.log; then
-      echo "✓ 单线程编译成功"
+      echo "✓ 单线程编译完成，检查结果..."
+      COMPILE_SUCCESS=true
     else
-      echo "单线程编译也失败，检查详细错误..."
+      echo "单线程编译也失败..."
       echo "=== 单线程编译SSL错误 ==="
       grep -i "ssl\|_ssl\|error.*ssl" make_single.log | head -20 || true
       echo "========================="
       tail -50 make_single.log || true
-      echo "尝试忽略部分错误继续..."
-      make -k || true
+      echo "尝试忽略错误继续编译..."
+      if make -k 2>&1 | tee make_continue.log; then
+        echo "⚠️  忽略错误编译完成，可能存在问题..."
+        COMPILE_SUCCESS=partial
+      else
+        echo "❌ 所有编译尝试都失败"
+        COMPILE_SUCCESS=false
+      fi
     fi
+  fi
+  
+  # 检查编译是否真正成功
+  if [ "$COMPILE_SUCCESS" = "true" ] || [ "$COMPILE_SUCCESS" = "partial" ]; then
+    echo "检查Python可执行文件是否生成..."
+    if [ -x "./python" ]; then
+      echo "✓ Python编译成功，生成了可执行文件"
+    elif [ -x "./python.exe" ]; then
+      echo "✓ Python编译成功，生成了可执行文件"
+    else
+      echo "⚠️  编译过程显示成功，但未找到Python可执行文件"
+      echo "这可能是因为SSL模块编译失败导致最终链接失败"
+      COMPILE_SUCCESS=false
+    fi
+  fi
+  
+  if [ "$COMPILE_SUCCESS" = "false" ]; then
+    echo "❌ Python编译失败"
+    echo "常见原因："
+    echo "1. OpenSSL版本不兼容（需要1.1.1+）"
+    echo "2. 编译依赖缺失"
+    echo "3. 编译器版本问题"
+    return 1
   fi
   
   # 在安装前验证SSL模块
@@ -632,80 +666,124 @@ EOF
   
   # 查找编译出的Python可执行文件
   PYTHON_BINARY=""
-  if [ -f "./python" ]; then
+  
+  echo "查找Python可执行文件..."
+  
+  # 按优先级查找Python可执行文件
+  if [ -x "./python" ]; then
     PYTHON_BINARY="./python"
-  elif [ -f "./python.exe" ]; then
+    echo "✓ 找到: ./python"
+  elif [ -x "./python.exe" ]; then
     PYTHON_BINARY="./python.exe"
-  elif [ -f "python" ]; then
+    echo "✓ 找到: ./python.exe"
+  elif [ -x "python" ]; then
     PYTHON_BINARY="python"
+    echo "✓ 找到: python"
   else
-    echo "⚠️  未找到编译的Python二进制文件，查找可用的..."
-    find . -name "python*" -type f -executable 2>/dev/null | head -5
-    PYTHON_BINARY="$(find . -name "python*" -type f -executable 2>/dev/null | head -1)"
+    echo "在当前目录查找Python可执行文件..."
+    
+    # 查找可能的Python可执行文件（排除源码文件）
+    POTENTIAL_PYTHON=$(find . -maxdepth 2 -name "python*" -type f -executable \
+      ! -name "*.c" ! -name "*.h" ! -name "*.py" ! -name "*.o" \
+      ! -name "*.wpr" ! -path "*/test/*" ! -path "*/Tests/*" \
+      ! -path "*/Modules/*" ! -path "*/PC/*" ! -path "*/Misc/*" \
+      2>/dev/null | head -1)
+    
+    if [ -n "$POTENTIAL_PYTHON" ] && [ -x "$POTENTIAL_PYTHON" ]; then
+      PYTHON_BINARY="$POTENTIAL_PYTHON"
+      echo "✓ 找到潜在的Python可执行文件: $POTENTIAL_PYTHON"
+    else
+      echo "❌ 未找到Python可执行文件，检查编译结果..."
+      echo "当前目录内容："
+      ls -la | head -10
+      echo "查找所有可执行文件："
+      find . -maxdepth 2 -type f -executable 2>/dev/null | head -10
+      echo "检查make install是否成功..."
+      echo "注意：Python可能没有编译成功，需要检查编译错误"
+    fi
   fi
   
   if [ -n "$PYTHON_BINARY" ] && [ -x "$PYTHON_BINARY" ]; then
-    echo "找到Python二进制文件: $PYTHON_BINARY"
+    echo "找到Python可执行文件: $PYTHON_BINARY"
+    echo "验证Python基本功能..."
     
-    # 尝试导入测试
-    if $PYTHON_BINARY -c "import ssl; print(f'SSL module: {ssl.OPENSSL_VERSION}'); import _ssl; print('_ssl module OK')" 2>/dev/null; then
-      echo "✓ SSL模块编译成功"
-    else
-      echo "❌ SSL模块编译失败，进行详细诊断..."
+    # 首先测试Python基本功能
+    if $PYTHON_BINARY --version 2>/dev/null; then
+      echo "✓ Python基本功能正常"
+      PYTHON_VERSION_OUTPUT=$($PYTHON_BINARY --version 2>&1)
+      echo "Python版本: $PYTHON_VERSION_OUTPUT"
       
-      # 详细诊断
-      echo "=== Python import ssl 详细错误 ==="
-      $PYTHON_BINARY -c "import ssl" 2>&1 || true
-      echo "=================================="
-      
-      echo "=== Python import _ssl 详细错误 ==="
-      $PYTHON_BINARY -c "import _ssl" 2>&1 || true
-      echo "==================================="
-      
-      echo "=== 检查可用模块 ==="
-      $PYTHON_BINARY -c "import sys; print('可用模块:'); print([m for m in sys.builtin_module_names if 'ssl' in m.lower()])" 2>/dev/null || true
-      echo "==================="
-      
-      echo "=== 检查动态库路径 ==="
-      $PYTHON_BINARY -c "
+      # 测试SSL模块
+      echo "测试SSL模块..."
+      if $PYTHON_BINARY -c "import ssl; print(f'SSL module: {ssl.OPENSSL_VERSION}'); import _ssl; print('_ssl module OK')" 2>/dev/null; then
+        echo "✓ SSL模块编译和导入成功"
+        SSL_VERSION=$($PYTHON_BINARY -c "import ssl; print(ssl.OPENSSL_VERSION)" 2>/dev/null)
+        echo "SSL库版本: $SSL_VERSION"
+      else
+        echo "❌ SSL模块导入失败，进行详细诊断..."
+        
+        # 详细诊断
+        echo "=== Python import ssl 详细错误 ==="
+        $PYTHON_BINARY -c "import ssl" 2>&1 || true
+        echo "=================================="
+        
+        echo "=== Python import _ssl 详细错误 ==="
+        $PYTHON_BINARY -c "import _ssl" 2>&1 || true
+        echo "==================================="
+        
+        echo "=== 检查可用的内置模块 ==="
+        $PYTHON_BINARY -c "
 import sys
-print('Python library path:')
+builtin_modules = sys.builtin_module_names
+ssl_modules = [m for m in builtin_modules if 'ssl' in m.lower()]
+print('SSL相关的内置模块:', ssl_modules)
+print('所有内置模块数量:', len(builtin_modules))
+" 2>/dev/null || true
+        echo "=============================="
+        
+        echo "=== 检查扩展模块目录 ==="
+        $PYTHON_BINARY -c "
+import sys
+print('Python路径:')
 for p in sys.path[:5]:  # 只显示前5个路径
     print(f'  {p}')
 " 2>/dev/null || true
-      echo "====================="
-      
-      echo "=== 检查已编译的扩展模块 ==="
-      find . -name "*.so" -name "*ssl*" 2>/dev/null | head -5
-      echo "=========================="
-      
-      # 检查SSL相关的编译错误
-      echo "=== 检查最近的编译错误 ==="
-      if [ -f "make.log" ]; then
-        grep -i "ssl\|_ssl\|error" make.log | tail -10 || true
+        echo "======================="
+        
+        echo "=== 检查已编译的扩展模块 ==="
+        find . -name "*.so" -name "*ssl*" 2>/dev/null | head -5
+        find . -name "_ssl*.so" 2>/dev/null | head -5
+        echo "=========================="
+        
+        # 检查SSL相关的编译错误
+        echo "=== 检查最近的SSL编译错误 ==="
+        if [ -f "make.log" ]; then
+          grep -i "ssl\|_ssl\|error" make.log | tail -10 || true
+        fi
+        echo "============================"
+        
+        # 如果SSL模块失败但Python其他功能正常，继续安装
+        echo "⚠️  SSL模块不可用，但Python基本功能正常"
+        echo "注意：pip可能无法通过HTTPS工作，需要使用HTTP源"
       fi
-      echo "========================="
-      
-      # 尝试手动重新构建SSL模块
-      echo "尝试手动重新构建SSL模块..."
-      
-      # 重新构建特定模块
-      make build_ssl 2>&1 || true
-      make Modules/_ssl.cpython-310-x86_64-linux-gnu.so 2>&1 || true
-      
-      # 如果仍然失败，但Python其他功能正常，继续安装
-      if $PYTHON_BINARY -c "print('Python基本功能正常')" 2>/dev/null; then
-        echo "⚠️  SSL模块构建失败，但Python基本功能正常，继续安装..."
-        echo "注意：pip可能无法通过HTTPS工作，需要使用HTTP源或手动安装包"
-      else
-        echo "❌ Python基本功能也有问题"
-        return 1
-      fi
+    else
+      echo "❌ Python基本功能测试失败"
+      echo "Python可执行文件可能损坏或不完整"
+      $PYTHON_BINARY --version 2>&1 || true
+      return 1
     fi
   else
-    echo "❌ 未找到可执行的Python二进制文件"
-    echo "查看编译目录内容："
+    echo "❌ 未找到可执行的Python文件"
+    echo "可能的原因："
+    echo "1. 编译过程失败，没有生成可执行文件"
+    echo "2. 可执行文件权限不正确"
+    echo "3. 链接过程失败"
+    echo ""
+    echo "当前目录内容："
     ls -la . | head -10
+    echo ""
+    echo "查找所有可执行文件："
+    find . -maxdepth 1 -type f -executable 2>/dev/null | head -10
     return 1
   fi
   
