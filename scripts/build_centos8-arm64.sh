@@ -84,12 +84,10 @@ cd ..
 echo "=== 编译动态链接库: ${LIBRARY_NAME} ==="
 cd wrapper
 
-# 编译C++动态链接库，包含SolveBellhopPropagationModel函数
+# 编译独立的C++动态链接库，不依赖Python
 g++ -shared -fPIC \
     -o "../dist/${LIBRARY_NAME}" \
     ${HEADER_NAME%.h}.cpp \
-    -I../python_core \
-    -lpython3 \
     -O2 \
     -DFUNCTION_NAME="${FUNCTION_NAME}" \
     -DSUCCESS_CODE=${SUCCESS_ERROR_CODE} \
