@@ -594,13 +594,64 @@ EOF
   fi
   rm -f /tmp/test_ssl /tmp/test_ssl.c
   
+  # 检查configure.log中的SSL配置
+  echo "检查configure结果中的SSL配置..."
+  if [ -f "config.log" ]; then
+    echo "=== SSL模块配置检查 ==="
+    grep -A5 -B5 "_ssl" config.log | head -20 || echo "未在config.log中找到_ssl模块信息"
+    echo ""
+    echo "=== OpenSSL库路径检查 ==="
+    grep -E "(openssl|ssl)" config.log | grep -E "(found|not found|yes|no)" | head -10 || echo "未找到OpenSSL配置信息"
+    echo "========================="
+  fi
+  
   # 先尝试正常编译
   echo "开始编译Python 3.10..."
   COMPILE_SUCCESS=false
   
   if make -j2 2>&1 | tee make.log; then
-    echo "✓ 并行编译完成，检查结果..."
-    COMPILE_SUCCESS=true
+    echo "✓ 并行编译过程完成，检查是否生成了可执行文件..."
+    
+    # 立即检查是否真的成功生成了可执行文件
+    echo "检查编译产物..."
+    echo "当前目录内容:"
+    ls -la | grep -E "python|Python" || echo "没有找到包含python的文件"
+    
+    # 检查是否生成了python可执行文件
+    if [ -x "./python" ]; then
+      echo "✓ 生成了./python可执行文件"
+      COMPILE_SUCCESS=true
+    elif [ -x "./python3" ]; then
+      echo "✓ 生成了./python3可执行文件" 
+      COMPILE_SUCCESS=true
+    elif [ -x "./python3.10" ]; then
+      echo "✓ 生成了./python3.10可执行文件"
+      COMPILE_SUCCESS=true
+    else
+      echo "❌ 编译过程显示成功，但没有生成可执行的python文件"
+      echo "这通常表示链接阶段失败"
+      
+      echo "查看make.log的最后部分:"
+      tail -50 make.log | grep -E "(error|Error|ERROR|fail|Fail|FAIL)" || echo "未发现明显错误信息"
+      
+      # 检查链接阶段
+      echo "检查是否有链接错误:"
+      grep -E "(ld:|linking|link error|undefined reference)" make.log | tail -10 || echo "未发现链接错误"
+      
+      # 检查SSL相关编译信息
+      echo "检查SSL模块编译情况:"
+      grep -i ssl make.log | tail -10 || echo "未发现SSL相关信息"
+      
+      # 检查OpenSSL库是否被找到
+      echo "检查OpenSSL库链接情况:"
+      grep -E "(libssl|libcrypto)" make.log | tail -5 || echo "未发现OpenSSL库信息"
+      
+      COMPILE_SUCCESS=false
+    fi
+    
+    echo "编译产物统计:"
+    echo "可执行文件数量: $(find . -maxdepth 1 -type f -executable | wc -l)"
+    echo "Python相关文件: $(find . -maxdepth 1 -name "*python*" | wc -l)"
   else
     echo "并行编译失败，检查错误信息..."
     echo "=== Make错误信息（SSL相关） ==="
@@ -614,8 +665,22 @@ EOF
     echo "尝试单线程编译..."
     make clean
     if make -j1 2>&1 | tee make_single.log; then
-      echo "✓ 单线程编译完成，检查结果..."
-      COMPILE_SUCCESS=true
+      echo "✓ 单线程编译过程完成，检查是否生成了可执行文件..."
+      
+      # 检查是否生成了python可执行文件
+      if [ -x "./python" ]; then
+        echo "✓ 单线程编译成功生成了./python可执行文件"
+        COMPILE_SUCCESS=true
+      elif [ -x "./python3" ]; then
+        echo "✓ 单线程编译成功生成了./python3可执行文件"
+        COMPILE_SUCCESS=true
+      elif [ -x "./python3.10" ]; then
+        echo "✓ 单线程编译成功生成了./python3.10可执行文件"
+        COMPILE_SUCCESS=true
+      else
+        echo "❌ 单线程编译也没有生成可执行文件"
+        COMPILE_SUCCESS=false
+      fi
     else
       echo "单线程编译也失败..."
       echo "=== 单线程编译SSL错误 ==="
@@ -653,7 +718,67 @@ EOF
     echo "1. OpenSSL版本不兼容（需要1.1.1+）"
     echo "2. 编译依赖缺失"
     echo "3. 编译器版本问题"
-    return 1
+    echo ""
+    echo "尝试诊断问题..."
+    
+    # 检查make.log中的具体错误
+    if [ -f "make.log" ]; then
+      echo "=== 编译日志中的关键错误 ==="
+      grep -i "error\|failed\|undefined" make.log | tail -20 || true
+      echo "=========================="
+    fi
+    
+    # 检查链接阶段的问题
+    echo "=== 检查链接相关问题 ==="
+    if [ -f "make.log" ]; then
+      grep -i "link\|ld:\|undefined reference" make.log | tail -10 || true
+    fi
+    echo "======================="
+    
+    # 尝试禁用优化重新编译
+    echo "尝试禁用优化重新编译..."
+    make clean
+    
+    # 重新configure禁用优化
+    echo "重新配置（禁用优化）..."
+    CFLAGS="$COMPILE_CFLAGS" \
+    CXXFLAGS="$COMPILE_CFLAGS" \
+    LDFLAGS="$COMPILE_LDFLAGS" \
+    CPPFLAGS="$CPPFLAGS" \
+    ./configure \
+      --enable-shared \
+      --prefix=/usr/local \
+      --with-ensurepip=install \
+      --enable-loadable-sqlite-extensions \
+      --with-ssl-default-suites=openssl \
+      $OPENSSL_CONFIG_ARGS \
+      --disable-test-modules 2>&1 | tee configure_no_opt.log
+    
+    # 尝试简单编译
+    if make -j1 2>&1 | tee make_no_opt.log; then
+      echo "✓ 禁用优化编译过程完成，检查是否生成了可执行文件..."
+      if [ -x "./python" ]; then
+        echo "✓ 禁用优化后成功生成了Python可执行文件"
+        COMPILE_SUCCESS=true
+      elif [ -x "./python3" ]; then
+        echo "✓ 禁用优化后成功生成了python3可执行文件"
+        COMPILE_SUCCESS=true
+      elif [ -x "./python3.10" ]; then
+        echo "✓ 禁用优化后成功生成了python3.10可执行文件"
+        COMPILE_SUCCESS=true
+      else
+        echo "❌ 禁用优化后仍未生成Python可执行文件"
+        echo "检查禁用优化编译的错误信息:"
+        tail -30 make_no_opt.log | grep -E "(error|Error|ERROR|fail|Fail)" || echo "未发现明显错误"
+        COMPILE_SUCCESS=false
+        exit 1
+      fi
+    else
+      echo "❌ 禁用优化后仍然编译失败"
+      echo "检查基础编译错误..."
+      tail -30 make_no_opt.log || true
+      exit 1
+    fi
   fi
   
   # 在安装前验证SSL模块
@@ -770,7 +895,7 @@ for p in sys.path[:5]:  # 只显示前5个路径
       echo "❌ Python基本功能测试失败"
       echo "Python可执行文件可能损坏或不完整"
       $PYTHON_BINARY --version 2>&1 || true
-      return 1
+      exit 1
     fi
   else
     echo "❌ 未找到可执行的Python文件"
@@ -784,7 +909,7 @@ for p in sys.path[:5]:  # 只显示前5个路径
     echo ""
     echo "查找所有可执行文件："
     find . -maxdepth 1 -type f -executable 2>/dev/null | head -10
-    return 1
+    exit 1
   fi
   
   # 安装Python
@@ -855,7 +980,7 @@ EOF
     echo "================================"
   else
     echo "❌ Python 3.10安装失败"
-    return 1
+    exit 1
   fi
 else
   # 从源码编译其他版本 (3.10, 3.11, 3.12)
@@ -949,7 +1074,7 @@ if ! command -v pip &> /dev/null; then
   
   if [ -z "$PYTHON_CMD" ]; then
     echo "❌ 无法找到可用的Python解释器"
-    return 1
+    exit 1
   fi
   
   echo "使用Python解释器: $PYTHON_CMD"
