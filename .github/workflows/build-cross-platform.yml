@@ -9,21 +9,22 @@ on:
 
 jobs:
   build-interface-compliant:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
-          # 国产化Linux ARM64平台 - Rocky Linux 8 (CentOS兼容)
+          # 国产化Linux ARM64平台 - CentOS 8兼容
           - platform: centos8-arm64
+            runner: ubuntu-22.04-arm
             docker_image: rockylinux/rockylinux:8
             arch: linux/arm64
-            gcc_target: "8.5.0"
+            gcc_target: "7.3.0"
             glibc_target: "2.28"
-            linux_target: "4.18.0"
-            description: "国产化Linux ARM64 (Rocky Linux 8 - CentOS兼容)"
+            linux_target: "4.19.90"
+            description: "国产化Linux ARM64 (CentOS 8兼容)"
             
-          # 国产化Linux ARM64平台 - Debian 11  
+          # 国产化Linux ARM64平台 - Debian 11兼容  
           - platform: debian11-arm64
+            runner: ubuntu-22.04-arm
             docker_image: arm64v8/debian:11
             arch: linux/arm64
             gcc_target: "9.3.0"
@@ -31,22 +32,47 @@ jobs:
             linux_target: "5.4.18"
             description: "国产化Linux ARM64 (Debian 11兼容)"
 
+          # Windows x86-64平台
+          - platform: windows-x64
+            runner: windows-2022
+            gcc_target: "6.3.0"
+            mingw_version: "mingw32"
+            description: "Windows x86-64 (MinGW32 6.3.0)"
+
+    runs-on: ${{ matrix.runner }}
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up QEMU for multi-arch
+    - name: Set up QEMU for multi-arch (Linux only)
+      if: matrix.platform != 'windows-x64'
       uses: docker/setup-qemu-action@v3
       with:
         platforms: arm64
 
-    - name: Set up Docker Buildx
+    - name: Set up Docker Buildx (Linux only)
+      if: matrix.platform != 'windows-x64'
       uses: docker/setup-buildx-action@v3
 
-    - name: Build Interface Compliant Artifacts
+    - name: Set up MinGW for Windows
+      if: matrix.platform == 'windows-x64'
+      uses: msys2/setup-msys2@v2
+      with:
+        msystem: MINGW64
+        update: true
+        install: >-
+          mingw-w64-x86_64-gcc
+          mingw-w64-x86_64-cmake
+          mingw-w64-x86_64-python
+          mingw-w64-x86_64-python-pip
+          mingw-w64-x86_64-nuitka
+
+    - name: Build Linux Interface Compliant Artifacts
+      if: matrix.platform != 'windows-x64'
       run: |
         echo "================================================"
-        echo "构建符合声传播模型接口规范的产物"
+        echo "构建符合声传播模型接口规范的产物 (Linux)"
         echo "平台: ${{ matrix.platform }}"
         echo "描述: ${{ matrix.description }}"
         echo "目标 GCC: ${{ matrix.gcc_target }}"
@@ -58,6 +84,93 @@ jobs:
           -v ${{ github.workspace }}:/workspace \
           -w /workspace \
           -e PLATFORM=${{ matrix.platform }} \
+          -e TARGET_GCC_VERSION=${{ matrix.gcc_target }} \
+          -e TARGET_GLIBC_VERSION=${{ matrix.glibc_target }} \
+          ${{ matrix.docker_image }} \
+          /bin/bash -c "
+            set -e
+            
+            echo '=== 环境准备 ==='
+            export DEBIAN_FRONTEND=noninteractive
+            
+            echo '=== 执行接口规范构建 ==='
+            chmod +x scripts/build_complete_dual_artifacts.sh
+            chmod +x scripts/build_${{ matrix.platform }}.sh
+            
+            # 使用统一构建脚本
+            ./scripts/build_complete_dual_artifacts.sh ${{ matrix.platform }}
+            
+            echo '=== 验证产物符合接口规范 ==='
+            if [ -f 'dist/BellhopPropagationModel' ]; then
+              echo '✅ 可执行文件: BellhopPropagationModel'
+              file dist/BellhopPropagationModel
+            else
+              echo '❌ 可执行文件缺失'
+              exit 1
+            fi
+            
+            if [ -f 'dist/libBellhopPropagationModel.so' ]; then
+              echo '✅ 动态链接库: libBellhopPropagationModel.so'
+              file dist/libBellhopPropagationModel.so
+            else
+              echo '❌ 动态链接库缺失'
+              exit 1
+            fi
+            
+            if [ -f 'dist/BellhopPropagationModelInterface.h' ]; then
+              echo '✅ 头文件: BellhopPropagationModelInterface.h'
+            else
+              echo '❌ 头文件缺失'
+              exit 1
+            fi
+            
+            echo '=== 接口规范验证通过 ==='
+          "
+
+    - name: Build Windows Interface Compliant Artifacts
+      if: matrix.platform == 'windows-x64'
+      shell: msys2 {0}
+      run: |
+        echo "================================================"
+        echo "构建符合声传播模型接口规范的产物 (Windows)"
+        echo "平台: ${{ matrix.platform }}"
+        echo "描述: ${{ matrix.description }}"
+        echo "目标 GCC: ${{ matrix.gcc_target }}"
+        echo "MinGW版本: ${{ matrix.mingw_version }}"
+        echo "================================================"
+        
+        # 执行Windows构建脚本
+        chmod +x scripts/build_complete_dual_artifacts.sh
+        chmod +x scripts/build_windows-x64.sh
+        
+        # 使用统一构建脚本
+        ./scripts/build_complete_dual_artifacts.sh windows-x64
+        
+        echo "=== 验证Windows产物符合接口规范 ==="
+        if [ -f 'dist/BellhopPropagationModel.exe' ]; then
+          echo '✅ 可执行文件: BellhopPropagationModel.exe'
+          file dist/BellhopPropagationModel.exe
+        else
+          echo '❌ 可执行文件缺失'
+          exit 1
+        fi
+        
+        if [ -f 'dist/BellhopPropagationModel.dll' ]; then
+          echo '✅ 动态链接库: BellhopPropagationModel.dll'
+          file dist/BellhopPropagationModel.dll
+        else
+          echo '❌ 动态链接库缺失'
+          exit 1
+        fi
+        
+        if [ -f 'dist/BellhopPropagationModelInterface.h' ]; then
+          echo '✅ 头文件: BellhopPropagationModelInterface.h'
+        else
+          echo '❌ 头文件缺失'
+          exit 1
+        fi
+        
+        echo '=== Windows接口规范验证通过 ===' \
           -e TARGET_GCC_VERSION=${{ matrix.gcc_target }} \
           -e TARGET_GLIBC_VERSION=${{ matrix.glibc_target }} \
           ${{ matrix.docker_image }} \
