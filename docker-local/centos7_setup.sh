@@ -212,37 +212,71 @@ elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
   echo "为Python 3.10准备CentOS 7兼容的OpenSSL环境..."
   
   # 检查当前OpenSSL版本
-  OPENSSL_VERSION=$(openssl version 2>/dev/null | awk '{print $2}' || echo "unknown")
-  echo "当前OpenSSL版本: $OPENSSL_VERSION"
+  CURRENT_OPENSSL_VERSION=$(openssl version 2>/dev/null | awk '{print $2}' || echo "unknown")
+  echo "当前OpenSSL版本: $CURRENT_OPENSSL_VERSION"
   
-  # CentOS 7默认OpenSSL 1.0.2不兼容Python 3.10，需要安装OpenSSL 1.1.1
-  if [[ "$OPENSSL_VERSION" == "1.0.2"* ]]; then
-    echo "⚠️  检测到OpenSSL 1.0.2，Python 3.10需要OpenSSL 1.1.1+"
-    echo "从源码编译安装OpenSSL 1.1.1..."
+  # 强制安装OpenSSL 1.1.1，因为CentOS 7的OpenSSL 1.0.2不兼容Python 3.10
+  echo "强制从源码编译安装OpenSSL 1.1.1（Python 3.10必需）..."
+  
+  # 安装OpenSSL编译依赖
+  echo "安装OpenSSL编译依赖..."
+  yum install -y perl-core zlib-devel make gcc || (
+    echo "部分OpenSSL依赖安装失败，尝试逐个安装..."
+    yum install -y perl-core || true
+    yum install -y zlib-devel || true
+    yum install -y make || true
+    yum install -y gcc || true
+  )
+  
+  cd /tmp
+  
+  # 下载OpenSSL 1.1.1w（最后一个1.1.1系列版本）
+  OPENSSL_VERSION_TO_INSTALL="1.1.1w"
+  echo "下载OpenSSL $OPENSSL_VERSION_TO_INSTALL..."
+  
+  # 清理之前的下载
+  rm -rf openssl-${OPENSSL_VERSION_TO_INSTALL}* openssl-OpenSSL*
+  
+  # 尝试多个下载源
+  OPENSSL_DOWNLOADED=false
+  
+  # 尝试官方源
+  if wget "https://www.openssl.org/source/openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" 2>/dev/null; then
+    echo "✓ 从官方源下载成功"
+    OPENSSL_DOWNLOADED=true
+  elif wget "https://github.com/openssl/openssl/archive/OpenSSL_$(echo ${OPENSSL_VERSION_TO_INSTALL} | tr '.' '_').tar.gz" -O "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" 2>/dev/null; then
+    echo "✓ 从GitHub下载成功"
+    OPENSSL_DOWNLOADED=true
+  elif wget "http://mirrors.kernel.org/openssl/source/openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" 2>/dev/null; then
+    echo "✓ 从镜像源下载成功"
+    OPENSSL_DOWNLOADED=true
+  else
+    echo "❌ 所有OpenSSL下载源都失败"
+    echo "尝试使用curl下载..."
+    if curl -L -o "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" "https://www.openssl.org/source/openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" 2>/dev/null; then
+      echo "✓ curl下载成功"
+      OPENSSL_DOWNLOADED=true
+    fi
+  fi
+  
+  if [ "$OPENSSL_DOWNLOADED" = "true" ] && [ -f "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" ]; then
+    echo "解压OpenSSL源码..."
+    tar xzf "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz"
     
-    # 安装OpenSSL编译依赖
-    yum install -y perl-core zlib-devel make gcc
-    
-    cd /tmp
-    
-    # 下载OpenSSL 1.1.1
-    OPENSSL_VERSION_TO_INSTALL="1.1.1w"
-    echo "下载OpenSSL $OPENSSL_VERSION_TO_INSTALL..."
-    
-    # 清理之前的下载
-    rm -rf openssl-${OPENSSL_VERSION_TO_INSTALL}*
-    
-    wget "https://www.openssl.org/source/openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" || {
-      echo "官方源下载失败，尝试备用源..."
-      wget "https://github.com/openssl/openssl/archive/OpenSSL_$(echo ${OPENSSL_VERSION_TO_INSTALL} | tr '.' '_').tar.gz" -O "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" || {
-        echo "所有OpenSSL源都失败，使用兼容性编译..."
-        USE_LEGACY_SSL=true
-      }
-    }
-    
-    if [ "$USE_LEGACY_SSL" != "true" ] && [ -f "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" ]; then
-      tar xzf "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz"
+    # 确定解压后的目录名
+    if [ -d "openssl-${OPENSSL_VERSION_TO_INSTALL}" ]; then
       cd "openssl-${OPENSSL_VERSION_TO_INSTALL}"
+    elif [ -d "openssl-OpenSSL_$(echo ${OPENSSL_VERSION_TO_INSTALL} | tr '.' '_')" ]; then
+      cd "openssl-OpenSSL_$(echo ${OPENSSL_VERSION_TO_INSTALL} | tr '.' '_')"
+    else
+      echo "❌ 找不到解压后的OpenSSL目录"
+      ls -la
+      USE_LEGACY_SSL=true
+    fi
+    
+    if [ "$USE_LEGACY_SSL" != "true" ]; then
+      echo "当前目录: $(pwd)"
+      ls -la
       
       # 确保使用DevToolSet 7编译器（如果可用）
       if [ -f /opt/rh/devtoolset-7/enable ]; then
@@ -250,16 +284,22 @@ elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
         echo "✓ 使用DevToolSet 7编译OpenSSL"
       fi
       
-      # 配置OpenSSL（安装到/usr/local/ssl以避免冲突）
-      echo "配置OpenSSL..."
-      ./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared zlib
+      # 配置OpenSSL（安装到/usr/local/ssl以避免与系统OpenSSL冲突）
+      echo "配置OpenSSL编译..."
+      ./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared zlib no-ssl3 no-comp
       
       # 编译OpenSSL
       echo "编译OpenSSL（这可能需要几分钟）..."
-      make -j2 || make -j1
+      if make -j2; then
+        echo "✓ OpenSSL编译成功"
+      else
+        echo "并行编译失败，尝试单线程编译..."
+        make clean
+        make -j1
+      fi
       
       # 安装OpenSSL
-      echo "安装OpenSSL..."
+      echo "安装OpenSSL到/usr/local/ssl..."
       make install
       
       # 配置库路径
@@ -276,19 +316,28 @@ elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
       
       # 验证新OpenSSL版本
       echo "验证新安装的OpenSSL..."
-      /usr/local/ssl/bin/openssl version
-      
-      # 为Python编译设置正确的OpenSSL路径
-      OPENSSL_PREFIX="/usr/local/ssl"
-      
-      echo "✓ OpenSSL 1.1.1安装完成"
-    else
-      echo "⚠️  OpenSSL升级失败，使用兼容性编译模式..."
-      USE_LEGACY_SSL=true
-      OPENSSL_PREFIX="/usr"
+      if [ -f "/usr/local/ssl/bin/openssl" ]; then
+        NEW_OPENSSL_VERSION=$(/usr/local/ssl/bin/openssl version)
+        echo "✓ 新OpenSSL版本: $NEW_OPENSSL_VERSION"
+        
+        # 为Python编译设置正确的OpenSSL路径
+        OPENSSL_PREFIX="/usr/local/ssl"
+        echo "✓ OpenSSL 1.1.1安装完成，将用于Python编译"
+      else
+        echo "❌ OpenSSL安装失败"
+        USE_LEGACY_SSL=true
+        OPENSSL_PREFIX="/usr"
+      fi
     fi
   else
-    echo "✓ OpenSSL版本可能兼容Python 3.10"
+    echo "❌ OpenSSL下载失败，将使用系统默认OpenSSL（可能导致Python 3.10编译失败）"
+    USE_LEGACY_SSL=true
+    OPENSSL_PREFIX="/usr"
+  fi
+  
+  if [ "$USE_LEGACY_SSL" = "true" ]; then
+    echo "⚠️  使用系统OpenSSL 1.0.2编译Python 3.10，预期会有编译错误"
+    echo "⚠️  建议手动安装OpenSSL 1.1.1或使用Python 3.9"
     OPENSSL_PREFIX="/usr"
   fi
   
