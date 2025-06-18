@@ -148,10 +148,52 @@ echo "安装 Python $PYTHON_VERSION..."
 
 # 对于CentOS 7，优先使用预编译版本或者更加稳定的编译配置
 if [[ "$PYTHON_VERSION" == "3.8" ]]; then
+  echo "安装Python 3.8及其开发环境..."
   yum install -y python38 python38-devel python38-pip || (
-    echo "Python 3.8 yum 安装失败，尝试其他方法..."
+    echo "Python 3.8 yum 安装失败，尝试通用python3..."
     yum install -y python3 python3-devel python3-pip || true
   )
+  
+  # 验证Python开发环境
+  echo "验证Python开发环境..."
+  PYTHON_VERSION_CHECK=""
+  if command -v python3.8 >/dev/null 2>&1; then
+    PYTHON_VERSION_CHECK=$(python3.8 --version 2>&1 || echo "")
+    PYTHON_CMD="python3.8"
+    # 检查开发头文件
+    PYTHON_INCLUDE_DIR=$(python3.8 -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || echo "")
+  elif command -v python3 >/dev/null 2>&1; then
+    PYTHON_VERSION_CHECK=$(python3 --version 2>&1 || echo "")
+    PYTHON_CMD="python3"
+    # 检查开发头文件
+    PYTHON_INCLUDE_DIR=$(python3 -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || echo "")
+  fi
+  
+  echo "Python版本: $PYTHON_VERSION_CHECK"
+  echo "Python头文件目录: $PYTHON_INCLUDE_DIR"
+  
+  # 验证Python.h是否存在
+  if [ -n "$PYTHON_INCLUDE_DIR" ] && [ -f "$PYTHON_INCLUDE_DIR/Python.h" ]; then
+    echo "✓ Python.h 找到: $PYTHON_INCLUDE_DIR/Python.h"
+  else
+    echo "❌ Python.h 缺失，尝试安装额外的开发包..."
+    
+    # 尝试安装更多的Python开发包
+    yum install -y python3-devel python36-devel python38-devel 2>/dev/null || true
+    
+    # 再次检查
+    if [ -n "$PYTHON_CMD" ]; then
+      PYTHON_INCLUDE_DIR=$($PYTHON_CMD -c "import sysconfig; print(sysconfig.get_path('include'))" 2>/dev/null || echo "")
+      if [ -n "$PYTHON_INCLUDE_DIR" ] && [ -f "$PYTHON_INCLUDE_DIR/Python.h" ]; then
+        echo "✓ Python.h 现在找到: $PYTHON_INCLUDE_DIR/Python.h"
+      else
+        echo "⚠️  Python.h 仍然缺失，可能影响某些Python包编译"
+        echo "查找可能的Python.h位置..."
+        find /usr -name "Python.h" 2>/dev/null | head -5 || echo "未找到Python.h"
+      fi
+    fi
+  fi
+  
   # 创建python符号链接，优先使用具体版本
   if command -v python3.8 >/dev/null 2>&1; then
     ln -sf $(which python3.8) /usr/local/bin/python
@@ -453,6 +495,47 @@ elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
     echo "✓ 使用DevToolSet 7编译器"
   fi
   
+  # 编译前环境完整性检查
+  echo "执行Python编译前环境完整性检查..."
+  
+  # 检查编译器
+  echo "检查编译器环境:"
+  gcc --version | head -1 || echo "❌ GCC不可用"
+  g++ --version | head -1 || echo "❌ G++不可用"
+  make --version | head -1 || echo "❌ Make不可用"
+  
+  # 检查必需的开发库
+  echo "检查编译所需的系统库:"
+  ldconfig -p | grep libssl | head -1 || echo "⚠️  libssl库可能缺失"
+  ldconfig -p | grep libcrypto | head -1 || echo "⚠️  libcrypto库可能缺失"
+  ldconfig -p | grep libz | head -1 || echo "⚠️  zlib库可能缺失"
+  ldconfig -p | grep libffi | head -1 || echo "⚠️  libffi库可能缺失"
+  
+  # 检查必需的头文件
+  echo "检查编译所需的头文件:"
+  [ -f "/usr/include/zlib.h" ] && echo "✓ zlib.h" || echo "❌ zlib.h缺失"
+  [ -f "/usr/include/ffi.h" ] || [ -f "/usr/lib64/libffi-*/include/ffi.h" ] && echo "✓ ffi.h" || echo "❌ ffi.h缺失"
+  [ -f "$SSL_INCLUDE_DIR/ssl.h" ] && echo "✓ ssl.h" || echo "❌ ssl.h缺失"
+  [ -f "$SSL_INCLUDE_DIR/crypto.h" ] && echo "✓ crypto.h" || echo "❌ crypto.h缺失"
+  
+  # 检查Python核心模块源码文件是否完整
+  echo "检查Python核心模块源码完整性:"
+  CORE_MODULE_FILES="Modules/_functoolsmodule.c Modules/symtablemodule.c Modules/faulthandler.c Modules/_codecsmodule.c Modules/_collectionsmodule.c"
+  for core_file in $CORE_MODULE_FILES; do
+    if [ -f "$core_file" ]; then
+      echo "✓ $(basename $core_file)"
+    else
+      echo "❌ $(basename $core_file) 缺失"
+    fi
+  done
+  
+  # 检查环境变量设置
+  echo "检查编译环境变量:"
+  echo "LDFLAGS: $LDFLAGS"
+  echo "CPPFLAGS: $CPPFLAGS"
+  echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
+  echo "LD_LIBRARY_PATH: $LD_LIBRARY_PATH"
+  
   # 创建专门的SSL编译配置
   echo "创建SSL强制编译配置（使用OpenSSL路径: $OPENSSL_PREFIX）..."
   cat > Modules/Setup.local << EOF
@@ -467,11 +550,8 @@ _hashlib _hashopenssl.c \\
     -L$SSL_LIB_DIR \\
     -lssl -lcrypto
 
-# 强制编译其他crypto相关模块
+# 强制编译网络和基础模块（保持默认配置）
 _socket socketmodule.c
-
-# 确保编译完整的网络功能
-_urllib3 urllibmodule.c
 EOF
 
   # 检查并修补Modules/Setup.dist（如果存在）
@@ -584,16 +664,31 @@ EOF
   echo "检查Makefile中引用的所有模块文件是否存在..."
   MISSING_MODULES=""
   
+  # 定义核心模块列表（绝对不能删除的）
+  CORE_MODULES="_symtable _functools faulthandler _codecs _collections _io _abc _signal _stat _time _thread _sre _locale _operator _weakref _warnings _string _bisect _random _struct _pickle _datetime _heapq _json"
+  
   # 提取所有Modules/xxxmodule.c引用
   for module_path in $(grep -o 'Modules/[a-zA-Z_][a-zA-Z0-9_]*module\.c' Makefile 2>/dev/null | sort | uniq); do
     if [ ! -f "$module_path" ]; then
       echo "⚠️  缺失模块文件: $module_path"
-      module_name=$(basename "$module_path" .c)
-      MISSING_MODULES="$MISSING_MODULES $module_name"
+      module_name=$(basename "$module_path" .c | sed 's/module$//')
       
-      # 从Makefile中移除这个模块的所有引用
-      echo "从Makefile中移除 $module_name 的所有引用..."
-      sed -i "/${module_name}/d" Makefile
+      # 检查是否是核心模块
+      IS_CORE=false
+      for core_mod in $CORE_MODULES; do
+        if echo "$module_name" | grep -q "$core_mod" || echo "$core_mod" | grep -q "$module_name"; then
+          echo "保留核心模块（即使文件缺失）: $module_name"
+          IS_CORE=true
+          break
+        fi
+      done
+      
+      # 只删除非核心的缺失模块
+      if [ "$IS_CORE" = "false" ]; then
+        echo "从Makefile中移除非核心缺失模块: $module_name"
+        MISSING_MODULES="$MISSING_MODULES $module_name"
+        sed -i "/${module_name}/d" Makefile
+      fi
     fi
   done
   
@@ -757,39 +852,69 @@ EOF
     
     # 检查是否是缺失模块文件导致的并行编译失败
     if grep -q "No rule to make target.*module\.c" make.log; then
-      echo "发现缺失模块文件错误，先修复Makefile再重试..."
+      echo "发现缺失模块文件错误，但不删除核心模块，直接尝试单线程编译..."
       
-      # 提取所有导致错误的模块文件
+      # 只记录但不删除模块，避免破坏核心功能
       FAILED_MODULES=$(grep "No rule to make target.*module\.c" make.log | sed -n "s/.*target '\([^']*\)'.*/\1/p" | sort | uniq)
       
       if [ -n "$FAILED_MODULES" ]; then
-        echo "发现导致并行编译失败的缺失模块文件:"
+        echo "发现导致并行编译失败的缺失模块文件（仅记录，不删除）:"
         echo "$FAILED_MODULES"
         
-        # 从Makefile中移除这些模块
+        # 检查是否涉及核心模块，如果是则保留原始配置
+        CORE_MODULES="_symtable _functools faulthandler _codecs _collections _io _abc _signal _stat _time _thread"
+        HAS_CORE_MODULE=false
+        
         for module_path in $FAILED_MODULES; do
-          module_name=$(basename "$module_path" .c)
-          echo "从Makefile中移除: $module_name"
-          sed -i "/${module_name}/d" Makefile
+          module_name=$(basename "$module_path" .c | sed 's/module$//')
+          for core_mod in $CORE_MODULES; do
+            if echo "$module_name" | grep -q "$core_mod"; then
+              echo "发现核心模块 $module_name，保留配置不删除"
+              HAS_CORE_MODULE=true
+              break
+            fi
+          done
         done
         
-        echo "✓ 已修复Makefile，重新尝试并行编译..."
-        make clean
-        
-        # 重新尝试并行编译
-        if make -j2 2>&1 | tee make_parallel_fixed.log; then
-          echo "✓ 修复后并行编译成功"
-          
-          # 检查是否生成了可执行文件
-          if [ -x "./python" ] || [ -x "./python3" ] || [ -x "./python3.10" ]; then
-            echo "✓ 修复后成功生成了Python可执行文件"
-            COMPILE_SUCCESS=true
-          else
-            echo "⚠️  编译完成但未生成可执行文件"
-            COMPILE_SUCCESS=false
-          fi
+        if [ "$HAS_CORE_MODULE" = "true" ]; then
+          echo "✓ 保留所有模块配置，直接尝试单线程编译..."
         else
-          echo "修复后并行编译仍然失败，尝试单线程编译..."
+          echo "删除非核心缺失模块，保留核心模块配置..."
+          # 只删除非核心的缺失模块
+          for module_path in $FAILED_MODULES; do
+            module_name=$(basename "$module_path" .c | sed 's/module$//')
+            IS_CORE=false
+            for core_mod in $CORE_MODULES; do
+              if echo "$module_name" | grep -q "$core_mod"; then
+                IS_CORE=true
+                break
+              fi
+            done
+            
+            if [ "$IS_CORE" = "false" ]; then
+              echo "删除非核心模块: $module_name"
+              sed -i "/${module_name}/d" Makefile
+            fi
+          done
+          
+          echo "✓ 已清理非核心缺失模块，重新尝试并行编译..."
+          make clean
+          
+          # 重新尝试并行编译
+          if make -j2 2>&1 | tee make_parallel_fixed.log; then
+            echo "✓ 修复后并行编译成功"
+            
+            # 检查是否生成了可执行文件
+            if [ -x "./python" ] || [ -x "./python3" ] || [ -x "./python3.10" ]; then
+              echo "✓ 修复后成功生成了Python可执行文件"
+              COMPILE_SUCCESS=true
+            else
+              echo "⚠️  编译完成但未生成可执行文件"
+              COMPILE_SUCCESS=false
+            fi
+          else
+            echo "修复后并行编译仍然失败，尝试单线程编译..."
+          fi
         fi
       fi
     fi
@@ -824,7 +949,7 @@ EOF
       # 检查是否是缺失模块文件导致的错误
       echo "检查是否是缺失模块文件导致的编译失败..."
       if grep -q "No rule to make target.*module\.c" make_single.log; then
-        echo "发现缺失模块文件错误，尝试修复Makefile..."
+        echo "发现缺失模块文件错误，智能修复Makefile..."
         
         # 提取所有导致错误的模块文件
         FAILED_MODULES=$(grep "No rule to make target.*module\.c" make_single.log | sed -n "s/.*target '\([^']*\)'.*/\1/p")
@@ -833,14 +958,31 @@ EOF
           echo "发现导致编译失败的缺失模块文件:"
           echo "$FAILED_MODULES"
           
-          # 从Makefile中移除这些模块
+          # 定义核心模块列表（绝对不能删除）
+          CORE_MODULES="_symtable _functools faulthandler _codecs _collections _io _abc _signal _stat _time _thread _sre _locale _operator _weakref _warnings _string _bisect _random _struct _pickle _datetime _heapq _json"
+          
+          # 智能删除：只删除非核心的缺失模块
           for module_path in $FAILED_MODULES; do
-            module_name=$(basename "$module_path" .c)
-            echo "从Makefile中移除: $module_name"
-            sed -i "/${module_name}/d" Makefile
+            module_name=$(basename "$module_path" .c | sed 's/module$//')
+            IS_CORE=false
+            
+            # 检查是否是核心模块
+            for core_mod in $CORE_MODULES; do
+              if echo "$module_name" | grep -q "$core_mod" || echo "$core_mod" | grep -q "$module_name"; then
+                echo "保留核心模块: $module_name"
+                IS_CORE=true
+                break
+              fi
+            done
+            
+            # 只删除非核心模块
+            if [ "$IS_CORE" = "false" ]; then
+              echo "删除非核心缺失模块: $module_name"
+              sed -i "/${module_name}/d" Makefile
+            fi
           done
           
-          echo "✓ 已修复Makefile，重新尝试编译..."
+          echo "✓ 已智能修复Makefile（保留所有核心模块），重新尝试编译..."
           make clean
           
           # 重新尝试单线程编译
@@ -1329,18 +1471,30 @@ fi
 # 最终验证pip功能并配置
 echo "=== 最终pip配置和验证 ==="
 
-# 找到pip命令
+# 找到pip命令 - 优先使用Python 3.10
 PIP_CMD=""
-if command -v pip >/dev/null 2>&1; then
-  PIP_CMD="pip"
-elif command -v pip3 >/dev/null 2>&1; then
-  PIP_CMD="pip3"
-elif [ -f /usr/local/bin/pip ]; then
-  PIP_CMD="/usr/local/bin/pip"
-elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
-  PIP_CMD="python3 -m pip"
-elif [ -f /usr/local/bin/python ] && /usr/local/bin/python -m pip --version >/dev/null 2>&1; then
-  PIP_CMD="/usr/local/bin/python -m pip"
+
+# 如果是Python 3.10，优先使用安装的Python 3.10的pip
+if [[ "$PYTHON_VERSION" == "3.10" ]] && [ -f /usr/local/bin/python3.10 ]; then
+  if /usr/local/bin/python3.10 -m pip --version >/dev/null 2>&1; then
+    PIP_CMD="/usr/local/bin/python3.10 -m pip"
+    echo "✓ 使用Python 3.10的pip: $PIP_CMD"
+  fi
+fi
+
+# 如果没有找到Python 3.10的pip，使用通用查找逻辑
+if [ -z "$PIP_CMD" ]; then
+  if command -v pip >/dev/null 2>&1; then
+    PIP_CMD="pip"
+  elif command -v pip3 >/dev/null 2>&1; then
+    PIP_CMD="pip3"
+  elif [ -f /usr/local/bin/pip ]; then
+    PIP_CMD="/usr/local/bin/pip"
+  elif command -v python3 >/dev/null 2>&1 && python3 -m pip --version >/dev/null 2>&1; then
+    PIP_CMD="python3 -m pip"
+  elif [ -f /usr/local/bin/python ] && /usr/local/bin/python -m pip --version >/dev/null 2>&1; then
+    PIP_CMD="/usr/local/bin/python -m pip"
+  fi
 fi
 
 if [ -n "$PIP_CMD" ]; then
