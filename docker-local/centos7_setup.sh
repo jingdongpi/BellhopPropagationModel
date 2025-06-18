@@ -323,10 +323,14 @@ elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
   if [ "$OPENSSL_PREFIX" = "/usr/local/ssl" ]; then
     echo "✓ 使用新安装的OpenSSL 1.1.1"
     export PKG_CONFIG_PATH="/usr/local/ssl/lib/pkgconfig:$PKG_CONFIG_PATH"
-    export LDFLAGS="-L/usr/local/ssl/lib -L/usr/lib64 -L/usr/lib -Wl,-rpath,/usr/local/ssl/lib -Wl,-rpath,/usr/lib64 -Wl,-rpath,/usr/lib"
-    export CPPFLAGS="-I/usr/local/ssl/include -I/usr/include/openssl -I/usr/include"
+    export LDFLAGS="-L/usr/local/ssl/lib -Wl,-rpath,/usr/local/ssl/lib -L/usr/lib64 -L/usr/lib -Wl,-rpath,/usr/lib64 -Wl,-rpath,/usr/lib"
+    export CPPFLAGS="-I/usr/local/ssl/include"
     SSL_INCLUDE_DIR="/usr/local/ssl/include"
     SSL_LIB_DIR="/usr/local/ssl/lib"
+    
+    # 确保旧的OpenSSL头文件不会被意外使用
+    export C_INCLUDE_PATH="/usr/local/ssl/include:$C_INCLUDE_PATH"
+    export CPLUS_INCLUDE_PATH="/usr/local/ssl/include:$CPLUS_INCLUDE_PATH"
   else
     echo "✓ 使用系统OpenSSL"
     export PKG_CONFIG_PATH="/usr/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
@@ -454,13 +458,18 @@ EOF
   # 根据OpenSSL安装位置设置configure参数
   if [ "$OPENSSL_PREFIX" = "/usr/local/ssl" ]; then
     OPENSSL_CONFIG_ARGS="--with-openssl=/usr/local/ssl --with-openssl-rpath=auto"
+    # 确保编译器使用正确的OpenSSL
+    COMPILE_CFLAGS="-O2 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong -I/usr/local/ssl/include"
+    COMPILE_LDFLAGS="-L/usr/local/ssl/lib -Wl,-rpath,/usr/local/ssl/lib"
   else
     OPENSSL_CONFIG_ARGS="--with-openssl=/usr --with-openssl-rpath=auto"
+    COMPILE_CFLAGS="-O2 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong"
+    COMPILE_LDFLAGS="$LDFLAGS"
   fi
   
-  CFLAGS="-O2 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong" \
-  CXXFLAGS="-O2 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong" \
-  LDFLAGS="$LDFLAGS" \
+  CFLAGS="$COMPILE_CFLAGS" \
+  CXXFLAGS="$COMPILE_CFLAGS" \
+  LDFLAGS="$COMPILE_LDFLAGS" \
   CPPFLAGS="$CPPFLAGS" \
   ./configure \
     --enable-shared \
@@ -495,24 +504,59 @@ EOF
     echo "⚠️  Configure可能未检测到正确的OpenSSL路径"
   fi
   
-  echo "开始编译Python 3.10（强制SSL支持）..."
+  echo "开始编译Python 3.10（使用OpenSSL $OPENSSL_PREFIX）..."
   
   # 记录编译过程详细信息
   echo "编译环境信息："
   echo "编译器版本: $(gcc --version | head -1)"
   echo "Make版本: $(make --version | head -1)"
   echo "当前目录: $(pwd)"
+  echo "OpenSSL配置: $OPENSSL_PREFIX"
+  echo "SSL包含目录: $SSL_INCLUDE_DIR"
+  echo "SSL库目录: $SSL_LIB_DIR"
+  echo "CFLAGS: $COMPILE_CFLAGS"
+  echo "LDFLAGS: $COMPILE_LDFLAGS"
+  echo "CPPFLAGS: $CPPFLAGS"
+  
   echo "OpenSSL库文件检查:"
-  find /usr -name "libssl.so*" -exec ls -la {} \; 2>/dev/null | head -3
+  find $SSL_LIB_DIR -name "libssl*" -exec ls -la {} \; 2>/dev/null | head -3
+  echo "OpenSSL头文件检查:"
+  ls -la $SSL_INCLUDE_DIR/ssl.h 2>/dev/null || echo "ssl.h not found in $SSL_INCLUDE_DIR"
+  
+  # 验证编译环境
+  echo "验证编译环境..."
+  echo "测试编译SSL程序："
+  cat > /tmp/test_ssl.c << 'EOF'
+#include <openssl/ssl.h>
+#include <stdio.h>
+
+int main() {
+    printf("OpenSSL version: %s\n", OPENSSL_VERSION_TEXT);
+    return 0;
+}
+EOF
+  
+  if gcc -I$SSL_INCLUDE_DIR -L$SSL_LIB_DIR -o /tmp/test_ssl /tmp/test_ssl.c -lssl -lcrypto 2>/dev/null; then
+    echo "✓ SSL编译测试成功"
+    /tmp/test_ssl || true
+  else
+    echo "❌ SSL编译测试失败"
+    gcc -I$SSL_INCLUDE_DIR -L$SSL_LIB_DIR -o /tmp/test_ssl /tmp/test_ssl.c -lssl -lcrypto 2>&1 || true
+  fi
+  rm -f /tmp/test_ssl /tmp/test_ssl.c
   
   # 先尝试正常编译
   if make -j2 2>&1 | tee make.log; then
     echo "✓ Python编译成功"
   else
     echo "编译失败，检查错误信息..."
-    echo "=== Make错误信息 ==="
+    echo "=== Make错误信息（SSL相关） ==="
+    grep -i "ssl\|_ssl\|error.*ssl" make.log | head -20 || true
+    echo "================================"
+    
+    echo "=== Make错误信息（最后50行） ==="
     tail -50 make.log || true
-    echo "==================="
+    echo "==============================="
     
     echo "尝试单线程编译..."
     make clean
@@ -520,6 +564,9 @@ EOF
       echo "✓ 单线程编译成功"
     else
       echo "单线程编译也失败，检查详细错误..."
+      echo "=== 单线程编译SSL错误 ==="
+      grep -i "ssl\|_ssl\|error.*ssl" make_single.log | head -20 || true
+      echo "========================="
       tail -50 make_single.log || true
       echo "尝试忽略部分错误继续..."
       make -k || true
@@ -534,44 +581,83 @@ EOF
   find . -name "*ssl*" -type f 2>/dev/null | head -10
   find . -name "*_ssl*" -type f 2>/dev/null | head -10
   
-  # 尝试导入测试
-  if ./python -c "import ssl; print(f'SSL module: {ssl.OPENSSL_VERSION}'); import _ssl; print('_ssl module OK')" 2>/dev/null; then
-    echo "✓ SSL模块编译成功"
+  # 查找编译出的Python可执行文件
+  PYTHON_BINARY=""
+  if [ -f "./python" ]; then
+    PYTHON_BINARY="./python"
+  elif [ -f "./python.exe" ]; then
+    PYTHON_BINARY="./python.exe"
+  elif [ -f "python" ]; then
+    PYTHON_BINARY="python"
   else
-    echo "❌ SSL模块编译失败，进行详细诊断..."
+    echo "⚠️  未找到编译的Python二进制文件，查找可用的..."
+    find . -name "python*" -type f -executable 2>/dev/null | head -5
+    PYTHON_BINARY="$(find . -name "python*" -type f -executable 2>/dev/null | head -1)"
+  fi
+  
+  if [ -n "$PYTHON_BINARY" ] && [ -x "$PYTHON_BINARY" ]; then
+    echo "找到Python二进制文件: $PYTHON_BINARY"
     
-    # 详细诊断
-    echo "=== Python import ssl 详细错误 ==="
-    ./python -c "import ssl" 2>&1 || true
-    echo "=================================="
-    
-    echo "=== Python import _ssl 详细错误 ==="
-    ./python -c "import _ssl" 2>&1 || true
-    echo "==================================="
-    
-    echo "=== 检查可用模块 ==="
-    ./python -c "import sys; print('可用模块:'); print([m for m in sys.builtin_module_names if 'ssl' in m.lower()])" 2>/dev/null || true
-    echo "==================="
-    
-    echo "=== 检查动态库 ==="
-    ./python -c "import sys; print('Python library path:'); [print(p) for p in sys.path]" 2>/dev/null || true
-    echo "================="
-    
-    # 尝试手动构建SSL模块
-    echo "尝试手动重新构建SSL模块..."
-    
-    # 重新构建特定模块
-    make build_ssl 2>&1 || true
-    make Modules/_ssl.cpython-310-x86_64-linux-gnu.so 2>&1 || true
-    
-    # 如果仍然失败，但Python其他功能正常，继续安装
-    if ./python -c "print('Python基本功能正常')" 2>/dev/null; then
-      echo "⚠️  SSL模块构建失败，但Python基本功能正常，继续安装..."
-      echo "注意：pip可能无法通过HTTPS工作，需要使用HTTP源或手动安装包"
+    # 尝试导入测试
+    if $PYTHON_BINARY -c "import ssl; print(f'SSL module: {ssl.OPENSSL_VERSION}'); import _ssl; print('_ssl module OK')" 2>/dev/null; then
+      echo "✓ SSL模块编译成功"
     else
-      echo "❌ Python基本功能也有问题"
-      return 1
+      echo "❌ SSL模块编译失败，进行详细诊断..."
+      
+      # 详细诊断
+      echo "=== Python import ssl 详细错误 ==="
+      $PYTHON_BINARY -c "import ssl" 2>&1 || true
+      echo "=================================="
+      
+      echo "=== Python import _ssl 详细错误 ==="
+      $PYTHON_BINARY -c "import _ssl" 2>&1 || true
+      echo "==================================="
+      
+      echo "=== 检查可用模块 ==="
+      $PYTHON_BINARY -c "import sys; print('可用模块:'); print([m for m in sys.builtin_module_names if 'ssl' in m.lower()])" 2>/dev/null || true
+      echo "==================="
+      
+      echo "=== 检查动态库路径 ==="
+      $PYTHON_BINARY -c "
+import sys
+print('Python library path:')
+for p in sys.path[:5]:  # 只显示前5个路径
+    print(f'  {p}')
+" 2>/dev/null || true
+      echo "====================="
+      
+      echo "=== 检查已编译的扩展模块 ==="
+      find . -name "*.so" -name "*ssl*" 2>/dev/null | head -5
+      echo "=========================="
+      
+      # 检查SSL相关的编译错误
+      echo "=== 检查最近的编译错误 ==="
+      if [ -f "make.log" ]; then
+        grep -i "ssl\|_ssl\|error" make.log | tail -10 || true
+      fi
+      echo "========================="
+      
+      # 尝试手动重新构建SSL模块
+      echo "尝试手动重新构建SSL模块..."
+      
+      # 重新构建特定模块
+      make build_ssl 2>&1 || true
+      make Modules/_ssl.cpython-310-x86_64-linux-gnu.so 2>&1 || true
+      
+      # 如果仍然失败，但Python其他功能正常，继续安装
+      if $PYTHON_BINARY -c "print('Python基本功能正常')" 2>/dev/null; then
+        echo "⚠️  SSL模块构建失败，但Python基本功能正常，继续安装..."
+        echo "注意：pip可能无法通过HTTPS工作，需要使用HTTP源或手动安装包"
+      else
+        echo "❌ Python基本功能也有问题"
+        return 1
+      fi
     fi
+  else
+    echo "❌ 未找到可执行的Python二进制文件"
+    echo "查看编译目录内容："
+    ls -la . | head -10
+    return 1
   fi
   
   # 安装Python
