@@ -31,7 +31,7 @@ if command -v apt-get >/dev/null 2>&1; then
     export DEBIAN_FRONTEND=noninteractive
     apt-get update
     apt-get install -y build-essential cmake python3 python3-pip python3-dev
-    apt-get install -y gcc g++ libc6-dev
+    apt-get install -y gcc g++ libc6-dev patchelf
 fi
 
 echo "=== Python环境设置 ==="

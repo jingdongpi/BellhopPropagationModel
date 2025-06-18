@@ -32,13 +32,13 @@ if command -v dnf >/dev/null 2>&1; then
     dnf update -y
     dnf groupinstall -y "Development Tools"
     dnf install -y cmake python3 python3-pip python3-devel
-    dnf install -y gcc-c++ glibc-devel
+    dnf install -y gcc-c++ glibc-devel patchelf
 elif command -v yum >/dev/null 2>&1; then
     echo "使用yum包管理器"
     yum update -y
     yum groupinstall -y "Development Tools"
     yum install -y cmake python3 python3-pip python3-devel
-    yum install -y gcc-c++ glibc-devel
+    yum install -y gcc-c++ glibc-devel patchelf
 fi
 
 echo "=== Python环境设置 ==="
