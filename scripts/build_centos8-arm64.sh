@@ -43,7 +43,10 @@ fi
 
 echo "=== Python环境设置 ==="
 python3 -m pip install --upgrade pip
-python3 -m pip install pybind11 numpy
+python3 -m pip install nuitka pybind11 numpy
+
+echo "=== 验证Nuitka安装 ==="
+python3 -m nuitka --version
 
 echo "=== 构建符合接口规范的产物 ==="
 

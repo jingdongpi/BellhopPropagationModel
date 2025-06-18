@@ -12,14 +12,14 @@ echo "目标: 完全符合声传播模型接口规范"
 
 case ${PLATFORM} in
     "centos8-arm64")
-        echo "=== 执行 CentOS 8 ARM64 构建 ==="
-        chmod +x scripts/build_centos8-arm64.sh
-        ./scripts/build_centos8-arm64.sh
+        echo "=== 执行 CentOS 8 ARM64 自包含构建 ==="
+        chmod +x scripts/build_centos8-arm64_selfcontained.sh
+        ./scripts/build_centos8-arm64_selfcontained.sh
         ;;
     "debian11-arm64")
-        echo "=== 执行 Debian 11 ARM64 构建 ==="
-        chmod +x scripts/build_debian11-arm64.sh
-        ./scripts/build_debian11-arm64.sh
+        echo "=== 执行 Debian 11 ARM64 自包含构建 ==="
+        chmod +x scripts/build_debian11-arm64_selfcontained.sh
+        ./scripts/build_debian11-arm64_selfcontained.sh
         ;;
     "windows-x64")
         echo "=== 执行 Windows x86-64 构建 ==="
