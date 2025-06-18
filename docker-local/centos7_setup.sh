@@ -208,11 +208,92 @@ elif [[ "$PYTHON_VERSION" == "3.9" ]]; then
     fi
   fi
 elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
-  # 对于Python 3.10，使用专门优化的SSL编译配置
-  echo "为Python 3.10配置CentOS 7兼容的SSL编译环境..."
+  # 对于Python 3.10，CentOS 7需要升级OpenSSL到1.1.1版本
+  echo "为Python 3.10准备CentOS 7兼容的OpenSSL环境..."
   
-  # 安装所有必要的编译依赖，确保SSL支持
-  echo "安装编译依赖（包含完整SSL支持）..."
+  # 检查当前OpenSSL版本
+  OPENSSL_VERSION=$(openssl version 2>/dev/null | awk '{print $2}' || echo "unknown")
+  echo "当前OpenSSL版本: $OPENSSL_VERSION"
+  
+  # CentOS 7默认OpenSSL 1.0.2不兼容Python 3.10，需要安装OpenSSL 1.1.1
+  if [[ "$OPENSSL_VERSION" == "1.0.2"* ]]; then
+    echo "⚠️  检测到OpenSSL 1.0.2，Python 3.10需要OpenSSL 1.1.1+"
+    echo "从源码编译安装OpenSSL 1.1.1..."
+    
+    # 安装OpenSSL编译依赖
+    yum install -y perl-core zlib-devel make gcc
+    
+    cd /tmp
+    
+    # 下载OpenSSL 1.1.1
+    OPENSSL_VERSION_TO_INSTALL="1.1.1w"
+    echo "下载OpenSSL $OPENSSL_VERSION_TO_INSTALL..."
+    
+    # 清理之前的下载
+    rm -rf openssl-${OPENSSL_VERSION_TO_INSTALL}*
+    
+    wget "https://www.openssl.org/source/openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" || {
+      echo "官方源下载失败，尝试备用源..."
+      wget "https://github.com/openssl/openssl/archive/OpenSSL_$(echo ${OPENSSL_VERSION_TO_INSTALL} | tr '.' '_').tar.gz" -O "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" || {
+        echo "所有OpenSSL源都失败，使用兼容性编译..."
+        USE_LEGACY_SSL=true
+      }
+    }
+    
+    if [ "$USE_LEGACY_SSL" != "true" ] && [ -f "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz" ]; then
+      tar xzf "openssl-${OPENSSL_VERSION_TO_INSTALL}.tar.gz"
+      cd "openssl-${OPENSSL_VERSION_TO_INSTALL}"
+      
+      # 确保使用DevToolSet 7编译器（如果可用）
+      if [ -f /opt/rh/devtoolset-7/enable ]; then
+        source /opt/rh/devtoolset-7/enable
+        echo "✓ 使用DevToolSet 7编译OpenSSL"
+      fi
+      
+      # 配置OpenSSL（安装到/usr/local/ssl以避免冲突）
+      echo "配置OpenSSL..."
+      ./config --prefix=/usr/local/ssl --openssldir=/usr/local/ssl shared zlib
+      
+      # 编译OpenSSL
+      echo "编译OpenSSL（这可能需要几分钟）..."
+      make -j2 || make -j1
+      
+      # 安装OpenSSL
+      echo "安装OpenSSL..."
+      make install
+      
+      # 配置库路径
+      echo "/usr/local/ssl/lib" > /etc/ld.so.conf.d/openssl.conf
+      ldconfig
+      
+      # 设置环境变量
+      export PATH="/usr/local/ssl/bin:$PATH"
+      export LD_LIBRARY_PATH="/usr/local/ssl/lib:$LD_LIBRARY_PATH"
+      export PKG_CONFIG_PATH="/usr/local/ssl/lib/pkgconfig:$PKG_CONFIG_PATH"
+      export OPENSSL_ROOT_DIR="/usr/local/ssl"
+      export OPENSSL_LIBRARIES="/usr/local/ssl/lib"
+      export OPENSSL_INCLUDE_DIR="/usr/local/ssl/include"
+      
+      # 验证新OpenSSL版本
+      echo "验证新安装的OpenSSL..."
+      /usr/local/ssl/bin/openssl version
+      
+      # 为Python编译设置正确的OpenSSL路径
+      OPENSSL_PREFIX="/usr/local/ssl"
+      
+      echo "✓ OpenSSL 1.1.1安装完成"
+    else
+      echo "⚠️  OpenSSL升级失败，使用兼容性编译模式..."
+      USE_LEGACY_SSL=true
+      OPENSSL_PREFIX="/usr"
+    fi
+  else
+    echo "✓ OpenSSL版本可能兼容Python 3.10"
+    OPENSSL_PREFIX="/usr"
+  fi
+  
+  # 安装Python编译依赖
+  echo "安装Python编译依赖..."
   yum install -y openssl-devel openssl-static libffi-devel zlib-devel bzip2-devel \
                  readline-devel sqlite-devel xz-devel tk-devel \
                  gdbm-devel libuuid-devel ncurses-devel expat-devel \
@@ -237,38 +318,62 @@ elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
   
   # 验证OpenSSL环境
   echo "验证OpenSSL编译环境..."
-  if [ ! -f /usr/include/openssl/opensslv.h ]; then
-    echo "❌ OpenSSL开发头文件缺失，强制重新安装..."
-    yum reinstall -y openssl-devel
+  
+  # 根据是否安装了新OpenSSL设置路径
+  if [ "$OPENSSL_PREFIX" = "/usr/local/ssl" ]; then
+    echo "✓ 使用新安装的OpenSSL 1.1.1"
+    export PKG_CONFIG_PATH="/usr/local/ssl/lib/pkgconfig:$PKG_CONFIG_PATH"
+    export LDFLAGS="-L/usr/local/ssl/lib -L/usr/lib64 -L/usr/lib -Wl,-rpath,/usr/local/ssl/lib -Wl,-rpath,/usr/lib64 -Wl,-rpath,/usr/lib"
+    export CPPFLAGS="-I/usr/local/ssl/include -I/usr/include/openssl -I/usr/include"
+    SSL_INCLUDE_DIR="/usr/local/ssl/include"
+    SSL_LIB_DIR="/usr/local/ssl/lib"
+  else
+    echo "✓ 使用系统OpenSSL"
+    export PKG_CONFIG_PATH="/usr/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+    export LDFLAGS="-L/usr/lib64 -L/usr/lib -Wl,-rpath,/usr/lib64 -Wl,-rpath,/usr/lib"
+    export CPPFLAGS="-I/usr/include/openssl -I/usr/include"
+    SSL_INCLUDE_DIR="/usr/include/openssl"
+    SSL_LIB_DIR="/usr/lib64"
   fi
   
-  # 检查OpenSSL库文件
-  if [ ! -f /usr/lib64/libssl.so ] && [ ! -f /usr/lib/libssl.so ]; then
+  export LD_LIBRARY_PATH="$SSL_LIB_DIR:/usr/lib64:/usr/lib:$LD_LIBRARY_PATH"
+  
+  # 验证OpenSSL文件
+  if [ ! -f "$SSL_INCLUDE_DIR/ssl.h" ]; then
+    echo "❌ OpenSSL开发头文件缺失: $SSL_INCLUDE_DIR/ssl.h"
+    find /usr -name "ssl.h" -type f 2>/dev/null | head -5
+  fi
+  
+  if [ ! -f "$SSL_LIB_DIR/libssl.so" ] && [ ! -f "$SSL_LIB_DIR/libssl.a" ]; then
     echo "❌ OpenSSL库文件缺失"
-    yum reinstall -y openssl-libs
+    find /usr -name "libssl.so*" -type f 2>/dev/null | head -5
   fi
   
   # 额外验证OpenSSL环境完整性
   echo "验证OpenSSL环境完整性..."
-  pkg-config --exists openssl || echo "⚠️  pkg-config无法找到OpenSSL"
-  find /usr -name "libssl.so*" -type f 2>/dev/null | head -5
-  find /usr -name "libcrypto.so*" -type f 2>/dev/null | head -5
-  ls -la /usr/include/openssl/ssl.h 2>/dev/null || echo "⚠️  ssl.h不存在"
+  echo "SSL_INCLUDE_DIR: $SSL_INCLUDE_DIR"
+  echo "SSL_LIB_DIR: $SSL_LIB_DIR"
+  ls -la "$SSL_INCLUDE_DIR/ssl.h" 2>/dev/null || echo "⚠️  ssl.h不存在"
+  ls -la "$SSL_LIB_DIR/libssl"* 2>/dev/null | head -3
   
   # 检查OpenSSL版本
-  openssl version || echo "⚠️  OpenSSL命令不可用"
+  if [ -f "/usr/local/ssl/bin/openssl" ]; then
+    /usr/local/ssl/bin/openssl version || echo "⚠️  新OpenSSL命令不可用"
+  else
+    openssl version || echo "⚠️  系统OpenSSL命令不可用"
+  fi
   
   # 设置完整的编译环境变量
-  export PKG_CONFIG_PATH="/usr/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
-  export LDFLAGS="-L/usr/lib64 -L/usr/lib -Wl,-rpath,/usr/lib64 -Wl,-rpath,/usr/lib"
-  export CPPFLAGS="-I/usr/include/openssl -I/usr/include"
-  export LD_LIBRARY_PATH="/usr/lib64:/usr/lib:$LD_LIBRARY_PATH"
+  export PKG_CONFIG_PATH="$SSL_LIB_DIR/pkgconfig:/usr/lib64/pkgconfig:/usr/lib/pkgconfig:/usr/local/lib64/pkgconfig:/usr/local/lib/pkgconfig:$PKG_CONFIG_PATH"
+  export LDFLAGS="-L$SSL_LIB_DIR -L/usr/lib64 -L/usr/lib -Wl,-rpath,$SSL_LIB_DIR -Wl,-rpath,/usr/lib64 -Wl,-rpath,/usr/lib"
+  export CPPFLAGS="-I$SSL_INCLUDE_DIR -I/usr/include"
+  export LD_LIBRARY_PATH="$SSL_LIB_DIR:/usr/lib64:/usr/lib:$LD_LIBRARY_PATH"
   
   cd /tmp
   
-  # 下载Python 3.10.12（稳定版本，CentOS 7兼容性好）
+  # 下载Python 3.10.12（稳定版本）
   DOWNLOAD_VERSION="3.10.12"
-  echo "下载Python $DOWNLOAD_VERSION（经过CentOS 7测试的稳定版本）..."
+  echo "下载Python $DOWNLOAD_VERSION（使用OpenSSL $OPENSSL_PREFIX）..."
   
   # 清理之前的下载
   rm -rf Python-${DOWNLOAD_VERSION}*
@@ -296,17 +401,17 @@ elif [[ "$PYTHON_VERSION" == "3.10" ]]; then
   fi
   
   # 创建专门的SSL编译配置
-  echo "创建SSL强制编译配置..."
-  cat > Modules/Setup.local << 'EOF'
-# 强制编译SSL模块
-_ssl _ssl.c \
-    -I/usr/include/openssl \
-    -L/usr/lib64 -L/usr/lib \
+  echo "创建SSL强制编译配置（使用OpenSSL路径: $OPENSSL_PREFIX）..."
+  cat > Modules/Setup.local << EOF
+# 强制编译SSL模块（使用正确的OpenSSL路径）
+_ssl _ssl.c \\
+    -I$SSL_INCLUDE_DIR \\
+    -L$SSL_LIB_DIR \\
     -lssl -lcrypto
 
-_hashlib _hashopenssl.c \
-    -I/usr/include/openssl \
-    -L/usr/lib64 -L/usr/lib \
+_hashlib _hashopenssl.c \\
+    -I$SSL_INCLUDE_DIR \\
+    -L$SSL_LIB_DIR \\
     -lssl -lcrypto
 
 # 强制编译其他crypto相关模块
@@ -335,27 +440,35 @@ optimize=1
 EOF
   
   # 使用强制SSL支持的配置选项
-  echo "配置Python编译（强制SSL支持）..."
+  echo "配置Python编译（使用OpenSSL $OPENSSL_PREFIX）..."
   
   # 详细记录configure过程
   echo "配置详细信息："
-  echo "OpenSSL库路径: $(find /usr -name 'libssl.so*' -type f 2>/dev/null | head -1)"
-  echo "OpenSSL头文件: /usr/include/openssl/"
+  echo "OpenSSL前缀: $OPENSSL_PREFIX"
+  echo "OpenSSL库路径: $SSL_LIB_DIR"
+  echo "OpenSSL头文件: $SSL_INCLUDE_DIR"
   echo "PKG_CONFIG_PATH: $PKG_CONFIG_PATH"
   echo "LDFLAGS: $LDFLAGS"
   echo "CPPFLAGS: $CPPFLAGS"
   
+  # 根据OpenSSL安装位置设置configure参数
+  if [ "$OPENSSL_PREFIX" = "/usr/local/ssl" ]; then
+    OPENSSL_CONFIG_ARGS="--with-openssl=/usr/local/ssl --with-openssl-rpath=auto"
+  else
+    OPENSSL_CONFIG_ARGS="--with-openssl=/usr --with-openssl-rpath=auto"
+  fi
+  
   CFLAGS="-O2 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong" \
   CXXFLAGS="-O2 -g -pipe -Wall -Wp,-D_FORTIFY_SOURCE=2 -fexceptions -fstack-protector-strong" \
-  LDFLAGS="-L/usr/lib64 -L/usr/lib -Wl,-rpath,/usr/lib64 -Wl,-rpath,/usr/lib" \
+  LDFLAGS="$LDFLAGS" \
+  CPPFLAGS="$CPPFLAGS" \
   ./configure \
     --enable-shared \
     --prefix=/usr/local \
     --with-ensurepip=install \
     --enable-loadable-sqlite-extensions \
     --with-ssl-default-suites=openssl \
-    --with-openssl=/usr \
-    --with-openssl-rpath=auto \
+    $OPENSSL_CONFIG_ARGS \
     --enable-optimizations \
     --disable-test-modules 2>&1 | tee configure.log
   
@@ -373,6 +486,13 @@ EOF
     echo "⚠️  SSL支持可能未启用"
     echo "配置输出片段："
     grep -i ssl configure.log | tail -10 || true
+  fi
+  
+  # 特别检查OpenSSL路径检测
+  if grep -i "$OPENSSL_PREFIX" configure.log; then
+    echo "✓ Configure检测到正确的OpenSSL路径"
+  else
+    echo "⚠️  Configure可能未检测到正确的OpenSSL路径"
   fi
   
   echo "开始编译Python 3.10（强制SSL支持）..."
