@@ -16,7 +16,6 @@ jobs:
           - platform: centos8-arm64
             runner: ubuntu-22.04-arm
             docker_image: rockylinux/rockylinux:8
-            arch: linux/arm64
             gcc_target: "7.3.0"
             glibc_target: "2.28"
             linux_target: "4.19.90"
@@ -26,7 +25,6 @@ jobs:
           - platform: debian11-arm64
             runner: ubuntu-22.04-arm
             docker_image: arm64v8/debian:11
-            arch: linux/arm64
             gcc_target: "9.3.0"
             glibc_target: "2.31"
             linux_target: "5.4.18"
@@ -45,13 +43,7 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
 
-    - name: Set up QEMU for multi-arch (Linux only)
-      if: matrix.platform != 'windows-x64'
-      uses: docker/setup-qemu-action@v3
-      with:
-        platforms: arm64
-
-    - name: Set up Docker Buildx (Linux only)
+    - name: Set up Docker for Linux builds
       if: matrix.platform != 'windows-x64'
       uses: docker/setup-buildx-action@v3
 
@@ -78,9 +70,11 @@ jobs:
         echo "目标 GCC: ${{ matrix.gcc_target }}"
         echo "目标 glibc: ${{ matrix.glibc_target }}"
         echo "目标 Linux: ${{ matrix.linux_target }}"
+        echo "Runner: ${{ matrix.runner }} (原生ARM64)"
         echo "================================================"
         
-        docker run --platform ${{ matrix.arch }} --rm \
+        # 直接在原生ARM64环境中运行Docker容器，无需QEMU
+        docker run --rm \
           -v ${{ github.workspace }}:/workspace \
           -w /workspace \
           -e PLATFORM=${{ matrix.platform }} \
