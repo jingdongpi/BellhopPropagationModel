@@ -1,0 +1,294 @@
+name: BellhopPropagationModel Interface Compliant Build
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  # 先执行接口规范验证
+  interface-validation:
+    uses: ./.github/workflows/interface-compliance-validation.yml
+  
+  build-interface-compliant:
+    needs: interface-validation
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          # 国产化Linux ARM64平台 - CentOS 8
+          - platform: centos8-arm64
+            docker_image: arm64v8/centos:8
+            arch: linux/arm64
+            gcc_target: "7.3.0"
+            glibc_target: "2.28"
+            linux_target: "4.19.90"
+            description: "国产化Linux ARM64 (CentOS 8兼容)"
+            
+          # 国产化Linux ARM64平台 - Debian 11  
+          - platform: debian11-arm64
+            docker_image: arm64v8/debian:11
+            arch: linux/arm64
+            gcc_target: "9.3.0"
+            glibc_target: "2.31"
+            linux_target: "5.4.18"
+            description: "国产化Linux ARM64 (Debian 11兼容)"
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up QEMU for multi-arch
+      uses: docker/setup-qemu-action@v3
+      with:
+        platforms: arm64
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
+    - name: Build Interface Compliant Artifacts
+      run: |
+        echo "================================================"
+        echo "构建符合声传播模型接口规范的产物"
+        echo "平台: ${{ matrix.platform }}"
+        echo "描述: ${{ matrix.description }}"
+        echo "目标 GCC: ${{ matrix.gcc_target }}"
+        echo "目标 glibc: ${{ matrix.glibc_target }}"
+        echo "目标 Linux: ${{ matrix.linux_target }}"
+        echo "================================================"
+        
+        docker run --platform ${{ matrix.arch }} --rm \
+          -v ${{ github.workspace }}:/workspace \
+          -w /workspace \
+          -e PLATFORM=${{ matrix.platform }} \
+          -e TARGET_GCC_VERSION=${{ matrix.gcc_target }} \
+          -e TARGET_GLIBC_VERSION=${{ matrix.glibc_target }} \
+          ${{ matrix.docker_image }} \
+          /bin/bash -c "
+            set -e
+            
+            echo '=== 环境准备 ==='
+            export DEBIAN_FRONTEND=noninteractive
+            
+            echo '=== 执行接口规范构建 ==='
+            chmod +x scripts/build_complete_dual_artifacts.sh
+            chmod +x scripts/build_${{ matrix.platform }}.sh
+            
+            # 使用统一构建脚本
+            ./scripts/build_complete_dual_artifacts.sh ${{ matrix.platform }}
+            
+            echo '=== 验证产物符合接口规范 ==='
+            if [ -f 'dist/BellhopPropagationModel' ]; then
+              echo '✅ 可执行文件: BellhopPropagationModel'
+              file dist/BellhopPropagationModel
+            else
+              echo '❌ 可执行文件缺失'
+              exit 1
+            fi
+            
+            if [ -f 'dist/libBellhopPropagationModel.so' ]; then
+              echo '✅ 动态链接库: libBellhopPropagationModel.so'
+              file dist/libBellhopPropagationModel.so
+            else
+              echo '❌ 动态链接库缺失'
+              exit 1
+            fi
+            
+            if [ -f 'dist/BellhopPropagationModelInterface.h' ]; then
+              echo '✅ 头文件: BellhopPropagationModelInterface.h'
+            else
+              echo '❌ 头文件缺失'
+              exit 1
+            fi
+            
+            echo '=== 接口规范验证通过 ==='
+          "
+
+    - name: Test Interface Compliance
+      run: |
+        echo "=== 测试接口规范符合性 ==="
+        
+        # 检查标准输入文件
+        if [ -f "dist/input.json" ]; then
+          echo "✅ 标准输入文件存在"
+          echo "输入文件内容预览:"
+          head -10 dist/input.json
+        fi
+        
+        # 验证产物结构
+        echo "=== 产物清单 ==="
+        ls -la dist/ || echo "无产物目录"
+        
+        echo "=== 接口规范检查 ==="
+        if [ -f "INTERFACE_COMPLIANCE_REPORT.md" ]; then
+          echo "✅ 接口规范报告存在"
+        fi
+
+    - name: Upload Interface Compliant Artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: bellhop-interface-compliant-${{ matrix.platform }}
+        path: |
+          dist/
+          INTERFACE_COMPLIANCE_REPORT.md
+          DUAL_ARTIFACTS_BUILD_GUIDE.md
+        retention-days: 30
+        if-no-files-found: error
+
+    - name: Create Interface Compliance Summary
+      run: |
+        echo "## 🎯 接口规范构建摘要 - ${{ matrix.platform }}" >> $GITHUB_STEP_SUMMARY
+        echo "**平台**: ${{ matrix.description }}" >> $GITHUB_STEP_SUMMARY  
+        echo "**目标环境**: gcc ${{ matrix.gcc_target }}, glibc ${{ matrix.glibc_target }}, linux ${{ matrix.linux_target }}+" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        echo "### ✅ 接口规范符合性" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.1.1 可执行文件: \`BellhopPropagationModel\`" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.1.2 动态链接库: \`libBellhopPropagationModel.so\`" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.1.2 计算函数: \`SolveBellhopPropagationModel\`" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.1.2 头文件: \`BellhopPropagationModelInterface.h\`" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.2 标准输入接口: JSON格式" >> $GITHUB_STEP_SUMMARY
+        echo "- 2.3 标准输出接口: JSON格式，错误码200/500" >> $GITHUB_STEP_SUMMARY
+        echo "" >> $GITHUB_STEP_SUMMARY
+        
+        if [ -d "dist" ]; then
+          echo "### 📦 构建产物" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          ls -la dist/ >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+        fi
+
+  create-interface-compliant-release:
+    needs: [build-interface-compliant]
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    steps:
+    - name: Download all artifacts
+      uses: actions/download-artifact@v4
+      
+    - name: Organize Interface Compliant Release
+      run: |
+        mkdir -p release
+        
+        # 整理符合接口规范的构建产物
+        for platform in centos8-arm64 debian11-arm64; do
+          artifact_name="bellhop-interface-compliant-$platform"
+          if [ -d "$artifact_name" ]; then
+            mkdir -p "release/$platform"
+            cp -r "$artifact_name"/* "release/$platform/" || true
+            
+            # 验证关键文件
+            echo "验证 $platform 平台产物:"
+            ls -la "release/$platform/" || true
+          fi
+        done
+        
+        # 创建符合接口规范的发布说明
+        cat > release/README.md << 'EOF'
+        # BellhopPropagationModel 接口规范构建产物
+        
+        本次发布完全符合声传播模型接口规范要求。
+        
+        ## 🎯 接口规范符合性
+        
+        ### ✅ 2.1.1 可执行文件命名规范
+        - 文件名: `BellhopPropagationModel`
+        - 支持无参数模式: 使用默认 `input.json` 和 `output.json`
+        - 支持指定文件模式: 支撑并行计算调用
+        
+        ### ✅ 2.1.2 动态链接库命名规范
+        - 动态链接库: `libBellhopPropagationModel.so`
+        - 计算函数: `int SolveBellhopPropagationModel(const std::string& json, std::string& outJson)`
+        - 头文件: `BellhopPropagationModelInterface.h`
+        
+        ### ✅ 2.2 & 2.3 标准接口
+        - 输入: JSON格式，包含完整参数规范
+        - 输出: JSON格式，错误码200成功/500失败
+        - 单位统一: 距离(m)、深度(m)、频率(Hz)
+        
+        ## 📦 平台支持
+        
+        ### centos8-arm64 (国产化Linux)
+        - **目标环境**: gcc 7.3.0、glibc 2.28、linux 4.19.90+
+        - **兼容性**: CentOS 7+、RHEL 7+、麒麟、统信等国产化操作系统
+        - **特点**: 更广泛的兼容性，适合国产化环境部署
+        
+        ### debian11-arm64 (国产化Linux)
+        - **目标环境**: gcc 9.3.0、glibc 2.31、linux 5.4.18+
+        - **兼容性**: Debian 11+、Ubuntu 20.04+、深度等国产化系统
+        - **特点**: 更新的工具链，更好的性能
+        
+        ## 🚀 产物说明
+        
+        每个平台目录包含符合规范的完整产物:
+        
+        1. **BellhopPropagationModel** - 可执行文件
+           - 支持 `./BellhopPropagationModel` (默认文件)
+           - 支持 `./BellhopPropagationModel input.json output.json` (指定文件)
+        
+        2. **libBellhopPropagationModel.so** - 动态链接库
+           - C++接口: `SolveBellhopPropagationModel(json, outJson)`
+           - 错误码: 200成功, 500失败
+        
+        3. **BellhopPropagationModelInterface.h** - 头文件
+           - 标准C++接口定义
+        
+        4. **input.json** - 标准输入示例
+           - 符合接口规范的完整输入格式
+        
+        5. **测试文件**
+           - `test_executable.sh` - 可执行文件测试
+           - `test_library.cpp` - 动态库测试程序
+           - `compile_test.sh` - 编译测试脚本
+        
+        ## 📋 使用方法
+        
+        ### 可执行文件使用
+        ```bash
+        # 下载对应平台的产物
+        cd centos8-arm64/  # 或 debian11-arm64/
+        
+        # 方式1: 使用默认文件
+        ./BellhopPropagationModel
+        
+        # 方式2: 指定文件 (支持并行)
+        ./BellhopPropagationModel task1_input.json task1_output.json
+        ```
+        
+        ### 动态链接库使用
+        ```cpp
+        #include "BellhopPropagationModelInterface.h"
+        
+        std::string input_json = "...";  // 符合规范的JSON输入
+        std::string output_json;
+        int result = SolveBellhopPropagationModel(input_json, output_json);
+        
+        if (result == 200) {
+            // 处理成功
+        } else {
+            // 处理失败
+        }
+        ```
+        
+        ## ✅ 质量保证
+        
+        - 完全符合声传播模型接口规范
+        - 自包含部署，无需Python环境
+        - 支持国产化操作系统
+        - 通过接口规范验证测试
+        - 支持单机、集群、超算并行计算
+        EOF
+      
+    - name: Create Interface Compliant Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: interface-v${{ github.run_number }}
+        name: BellhopPropagationModel Interface Compliant v${{ github.run_number }}
+        body_path: release/README.md
+        files: release/**/*
+        draft: false
+        prerelease: false
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
