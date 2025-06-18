@@ -13,14 +13,14 @@ jobs:
     strategy:
       matrix:
         include:
-          # 国产化Linux ARM64平台 - CentOS 8
+          # 国产化Linux ARM64平台 - Rocky Linux 8 (CentOS兼容)
           - platform: centos8-arm64
-            docker_image: arm64v8/centos:8
+            docker_image: rockylinux/rockylinux:8
             arch: linux/arm64
-            gcc_target: "7.3.0"
+            gcc_target: "8.5.0"
             glibc_target: "2.28"
-            linux_target: "4.19.90"
-            description: "国产化Linux ARM64 (CentOS 8兼容)"
+            linux_target: "4.18.0"
+            description: "国产化Linux ARM64 (Rocky Linux 8 - CentOS兼容)"
             
           # 国产化Linux ARM64平台 - Debian 11  
           - platform: debian11-arm64

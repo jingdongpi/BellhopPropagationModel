@@ -1,18 +1,18 @@
 #!/bin/bash
-# CentOS 8 ARM64 平台构建脚本 - 符合声传播模型接口规范
-# 目标环境: gcc 7.3.0, glibc 2.28, linux 4.19.90+
+# Rocky Linux 8 ARM64 平台构建脚本 - 符合声传播模型接口规范 (CentOS兼容)
+# 目标环境: gcc 8.5.0, glibc 2.28, linux 4.18.0+
 # 产物: BellhopPropagationModel (可执行文件) + libBellhopPropagationModel.so (动态链接库)
 
 set -e
 
-echo "🎯 开始 CentOS 8 ARM64 接口规范构建"
+echo "🎯 开始 Rocky Linux 8 ARM64 接口规范构建 (CentOS兼容)"
 echo "目标: 完全符合声传播模型接口规范"
 
 # 环境设置
 export PLATFORM="centos8-arm64"
-export TARGET_GCC_VERSION="7.3.0"
+export TARGET_GCC_VERSION="8.5.0"
 export TARGET_GLIBC_VERSION="2.28"
-export TARGET_LINUX_VERSION="4.19.90"
+export TARGET_LINUX_VERSION="4.18.0"
 
 # 2.1.1 可执行文件命名规范
 export EXECUTABLE_NAME="BellhopPropagationModel"
@@ -27,7 +27,14 @@ export SUCCESS_ERROR_CODE="200"
 export FAILURE_ERROR_CODE="500"
 
 echo "=== 环境准备 ==="
-if command -v yum >/dev/null 2>&1; then
+if command -v dnf >/dev/null 2>&1; then
+    echo "使用dnf包管理器 (Rocky Linux/CentOS Stream)"
+    dnf update -y
+    dnf groupinstall -y "Development Tools"
+    dnf install -y cmake python3 python3-pip python3-devel
+    dnf install -y gcc-c++ glibc-devel
+elif command -v yum >/dev/null 2>&1; then
+    echo "使用yum包管理器"
     yum update -y
     yum groupinstall -y "Development Tools"
     yum install -y cmake python3 python3-pip python3-devel
@@ -207,5 +214,5 @@ echo "✅ 测试脚本: dist/test_executable.sh, dist/compile_test.sh"
 echo "=== 产物清单 ==="
 ls -la dist/
 
-echo "🎯 CentOS 8 ARM64 接口规范构建完成！"
+echo "🎯 Rocky Linux 8 ARM64 接口规范构建完成！(CentOS兼容)"
 echo "完全符合声传播模型接口规范要求"
